@@ -1237,6 +1237,12 @@
         mailReplyTo: 'dm.sorgues@narbonneaccessoires.fr',
         defaultHeuresTA: [35, 35, 35]
       },
+      'perpignan': {
+        name: 'Perpignan',
+        sheetId: '1cnZJRlIjoRYlWn8mPJgv-hVvXcrkFBIVgW387u61840',
+        mailReplyTo: 'dm.perpignan@narbonneaccessoires.fr',
+        defaultHeuresTA: [35, 35, 35]
+      },
       'demo': {
         name: '🎯 DÉMO',
         sheetId: '1Lm4YVL08gm__a-JpdoTzJzYEYfd3ZHKT_4G_M2g9zgU',
@@ -1284,6 +1290,7 @@
       'narbonneatelier113@gmail.com': ['bordeaux-nord'],
       'narb.146.dm@gmail.com': ['la-rochelle'],
       'sorguesdm@gmail.com': ['sorgues'],
+      'atelierna.perpignan@gmail.com': ['perpignan'],
       // Administrateur régional PACA (vue uniquement, pas de génération PDF)
       'ludovic.bernabeu91@gmail.com': ['sorgues', 'aubagne', 'pennes-mirabeau']
     };
@@ -5672,31 +5679,24 @@
         const hh = Math.floor(heureNum);
         const mm = (heureNum - hh) * 60;
         const heureStr = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
-        const tempsReel = Number(first[COL.TEMPS_REEL]) || 0;
         const forfait = first[COL.FORFAIT] || '';
         const designation = first[COL.DESIGNATION] || '';
 
         body += `🕐 Heure : ${heureStr}\n`;
-        if (tempsReel > 0) {
-          body += `⏱️ Durée estimée : ${String(tempsReel).replace('.', ',')} h\n`;
-        }
+        // v45 : la durée estimée n'est plus mentionnée au client
         if (forfait || designation) {
           body += `🔧 Prestation : ${forfait}${designation ? ' - ' + designation : ''}\n`;
         }
       } else {
         // Plusieurs interventions : lister toutes les prestations
-        // Heure de début = la plus tôt, heure de fin estimée = heure début + somme des temps
+        // Heure de début = la plus tôt (la durée totale n'est plus mentionnée depuis v45)
         const firstSlot = (Number(sameDayInterventions[0][COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
         const heureNum = WORK_HOURS_START + firstSlot * 0.5;
         const hh = Math.floor(heureNum);
         const mm = (heureNum - hh) * 60;
         const heureStr = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
-        const tempsTotal = sameDayInterventions.reduce((sum, row) => sum + (Number(row[COL.TEMPS_TOTAL]) || Number(row[COL.TEMPS_REEL]) || 0), 0);
 
         body += `🕐 Heure : ${heureStr}\n`;
-        if (tempsTotal > 0) {
-          body += `⏱️ Durée totale estimée : ${tempsTotal.toFixed(1).replace('.', ',')} h\n`;
-        }
         body += `\n🔧 Prestations prévues (${sameDayInterventions.length}) :\n`;
         sameDayInterventions.forEach(row => {
           const f = row[COL.FORFAIT] || '';
