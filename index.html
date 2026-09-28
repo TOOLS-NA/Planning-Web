@@ -722,8 +722,9 @@
       </div>
 
       <div class="form-row">
-        <label class="required" for="urg-forfait">Forfait</label>
-        <select id="urg-forfait"><option value="">— Choisir un forfait —</option></select>
+        <label class="required" for="urg-forfait">Forfait <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(tapez le code ou cliquez la flèche)</span></label>
+        <input type="text" id="urg-forfait" list="urg-forfait-list" placeholder="Ex : FP127 — ou cherchez par mot-clé" autocomplete="off">
+        <datalist id="urg-forfait-list"></datalist>
         <div class="field-hint" id="urg-forfait-info">Prix : — • Durée : —</div>
       </div>
 
@@ -980,8 +981,9 @@
             <input type="text" id="f-client" placeholder="Nom du client">
           </div>
           <div class="form-row">
-            <label class="required" for="f-forfait">Forfait</label>
-            <select id="f-forfait"><option value="">— Choisir un forfait —</option></select>
+            <label class="required" for="f-forfait">Forfait <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(tapez le code ou cliquez la flèche)</span></label>
+            <input type="text" id="f-forfait" list="f-forfait-list" placeholder="Ex : FP127 — ou cherchez par mot-clé" autocomplete="off">
+            <datalist id="f-forfait-list"></datalist>
             <div class="field-hint" id="f-forfait-info">Prix : — • Durée : —</div>
           </div>
         </div>
@@ -1516,7 +1518,9 @@
       document.getElementById('urgence-modal').addEventListener('click', (e) => {
         if (e.target.id === 'urgence-modal') closeUrgenceForm();
       });
+      // v46 : forfait passé en input+datalist
       document.getElementById('urg-forfait').addEventListener('change', updateUrgenceForfaitInfo);
+      document.getElementById('urg-forfait').addEventListener('input', updateUrgenceForfaitInfo);
       // Absence
       document.getElementById('btn-add-absence').addEventListener('click', openAbsenceForm);
       document.getElementById('btn-cancel-absence').addEventListener('click', closeAbsenceForm);
@@ -1675,7 +1679,9 @@
       document.getElementById('form-modal').addEventListener('click', (e) => {
         if (e.target.id === 'form-modal') closeAddForm();
       });
+      // v46 : forfait passé en input+datalist → écouter à la fois change (validation) et input (frappe)
       document.getElementById('f-forfait').addEventListener('change', updateForfaitInfo);
+      document.getElementById('f-forfait').addEventListener('input', updateForfaitInfo);
       document.getElementById('f-fidelite').addEventListener('change', updateForfaitInfo);
       document.getElementById('f-mopa').addEventListener('change', updateTcSummary);
       document.getElementById('f-tcHeures').addEventListener('input', updateTcSummary);
@@ -3434,14 +3440,21 @@
         heureSelect.appendChild(opt);
       }
 
-      // Remplir le menu Forfait
-      const forfaitSelect = document.getElementById('f-forfait');
-      forfaitSelect.innerHTML = '<option value="">— Choisir un forfait —</option>';
+      // Remplir la datalist Forfait (v46 : input + autocomplétion HTML5)
+      // - option.value = ce qui est écrit dans l'input quand on sélectionne
+      // - option.textContent = ce qui s'affiche dans la liste déroulante
+      // On met le code seul dans value pour saisie rapide, et code + désignation en label pour la recherche
+      const forfaitInput = document.getElementById('f-forfait');
+      const forfaitList = document.getElementById('f-forfait-list');
+      forfaitInput.value = '';
+      forfaitList.innerHTML = '';
       assortiment.forEach(f => {
         const opt = document.createElement('option');
         opt.value = f.code;
-        opt.textContent = `${f.code}${f.designation ? ' - ' + f.designation : ''}`;
-        forfaitSelect.appendChild(opt);
+        // Le label affiché dans la liste montre le code + la désignation pour aider à la recherche
+        opt.label = `${f.code}${f.designation ? ' - ' + f.designation : ''}`;
+        opt.textContent = opt.label;
+        forfaitList.appendChild(opt);
       });
 
       // Pré-remplir depuis le contexte (si clic sur cellule)
@@ -3558,20 +3571,32 @@
     }
 
     function updateForfaitInfo() {
-      const code = document.getElementById('f-forfait').value;
+      const input = document.getElementById('f-forfait');
+      const rawValue = (input.value || '').trim();
+      // v46 : normaliser la saisie manuelle (uppercase + supprimer espaces internes)
+      // Ex : "fp127" → "FP127", "fp 127" → "FP127"
+      const code = rawValue.toUpperCase().replace(/\s+/g, '');
       const fidelite = document.getElementById('f-fidelite').value;
       const info = document.getElementById('f-forfait-info');
       if (!code) {
         info.textContent = 'Prix : — • Durée : —';
+        info.style.color = '';
         refreshMopaSelect('');
         return;
       }
       const f = assortiment.find(x => x.code === code);
       if (!f) {
-        info.textContent = 'Forfait introuvable';
+        // Ne pas encore forcer la casse tant que le vendeur tape (l'input peut être partiel)
+        info.textContent = `⚠️ Code « ${rawValue} » introuvable dans l'assortiment`;
+        info.style.color = '#dc2626';
         refreshMopaSelect('');
         return;
       }
+      // Match trouvé : normaliser le champ pour éviter les erreurs à l'enregistrement
+      if (input.value !== code) {
+        input.value = code;
+      }
+      info.style.color = '';
       const remise = (fidelite === 'OUI') ? 0.9 : 1;
       const prix = (f.prix * remise).toFixed(2).replace('.', ',');
       info.textContent = `Prix : ${prix} € • Durée : ${f.duree} h`;
@@ -3680,14 +3705,20 @@
         const slotStart = parseInt(document.getElementById('f-heure').value);
         const dureeInput = document.getElementById('f-duree').value;
         const client = document.getElementById('f-client').value.trim();
-        const forfaitCode = document.getElementById('f-forfait').value;
+        // v46 : normaliser la saisie forfait (uppercase + suppression espaces)
+        const forfaitRaw = document.getElementById('f-forfait').value.trim();
+        const forfaitCode = forfaitRaw.toUpperCase().replace(/\s+/g, '');
+        // Aligner le champ visuellement
+        if (forfaitRaw && forfaitCode !== forfaitRaw) {
+          document.getElementById('f-forfait').value = forfaitCode;
+        }
 
         // Validation
         if (!client) throw new Error('Le client est obligatoire');
         if (!forfaitCode) throw new Error('Le forfait est obligatoire');
 
         const forfaitData = assortiment.find(f => f.code === forfaitCode);
-        if (!forfaitData) throw new Error('Forfait introuvable dans ASSORTIMENT');
+        if (!forfaitData) throw new Error(`Forfait « ${forfaitCode} » introuvable dans l'assortiment. Vérifiez la saisie.`);
 
         const dureePrevue = forfaitData.duree;
         const tempsReel = dureeInput ? Number(dureeInput) : dureePrevue;
@@ -4816,14 +4847,17 @@
         jourSelect.appendChild(opt);
       }
 
-      // Remplir le sélecteur de forfait (depuis assortiment chargé)
-      const forfaitSelect = document.getElementById('urg-forfait');
-      forfaitSelect.innerHTML = '<option value="">— Choisir un forfait —</option>';
+      // Remplir la datalist forfait (v46 : input + autocomplétion)
+      const urgForfaitInput = document.getElementById('urg-forfait');
+      const urgForfaitList = document.getElementById('urg-forfait-list');
+      urgForfaitInput.value = '';
+      urgForfaitList.innerHTML = '';
       assortiment.forEach(f => {
         const opt = document.createElement('option');
         opt.value = f.code;
-        opt.textContent = `${f.code} - ${f.designation}`;
-        forfaitSelect.appendChild(opt);
+        opt.label = `${f.code} - ${f.designation}`;
+        opt.textContent = opt.label;
+        urgForfaitList.appendChild(opt);
       });
 
       // Reset
@@ -4877,11 +4911,21 @@
     }
 
     function updateUrgenceForfaitInfo() {
-      const code = document.getElementById('urg-forfait').value;
+      const input = document.getElementById('urg-forfait');
+      const rawValue = (input.value || '').trim();
+      // v46 : normaliser la saisie manuelle (uppercase + supprimer espaces)
+      const code = rawValue.toUpperCase().replace(/\s+/g, '');
       const info = document.getElementById('urg-forfait-info');
-      if (!code) { info.textContent = 'Prix : — • Durée : —'; return; }
+      if (!code) { info.textContent = 'Prix : — • Durée : —'; info.style.color = ''; return; }
       const f = assortiment.find(x => x.code === code);
-      if (!f) { info.textContent = 'Forfait introuvable'; return; }
+      if (!f) {
+        info.textContent = `⚠️ Code « ${rawValue} » introuvable dans l'assortiment`;
+        info.style.color = '#dc2626';
+        return;
+      }
+      // Match trouvé : normaliser le champ
+      if (input.value !== code) input.value = code;
+      info.style.color = '';
       const prix = f.prix.toFixed(2).replace('.', ',');
       info.textContent = `Prix : ${prix} € • Durée : ${f.duree} h`;
     }
@@ -4934,14 +4978,19 @@
       try {
         const jourIdx = parseInt(document.getElementById('urg-jour').value);
         const ta = document.getElementById('urg-ta').value;
-        const forfaitCode = document.getElementById('urg-forfait').value;
+        // v46 : normaliser la saisie manuelle du forfait
+        const forfaitRaw = document.getElementById('urg-forfait').value.trim();
+        const forfaitCode = forfaitRaw.toUpperCase().replace(/\s+/g, '');
+        if (forfaitRaw && forfaitCode !== forfaitRaw) {
+          document.getElementById('urg-forfait').value = forfaitCode;
+        }
         const client = document.getElementById('urg-client').value.trim();
 
         if (!forfaitCode) throw new Error('Forfait obligatoire');
         if (!client) throw new Error('Client obligatoire');
 
         const f = assortiment.find(x => x.code === forfaitCode);
-        if (!f) throw new Error('Forfait introuvable dans ASSORTIMENT');
+        if (!f) throw new Error(`Forfait « ${forfaitCode} » introuvable dans l'assortiment. Vérifiez la saisie.`);
 
         // Date = jour sélectionné de la semaine
         const date = new Date(selectedMonday);
