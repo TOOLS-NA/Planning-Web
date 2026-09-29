@@ -2985,8 +2985,10 @@
           while (placedSlots < slotsNeeded && curSlot < slotsCount) {
             const h = WORK_HOURS_START + curSlot * 0.5;
             if (h >= PAUSE_START && h < PAUSE_END) { curSlot++; continue; }
+            // v49b : liste au lieu d'objet unique → gère les chevauchements
             if (!occupation[curSlot]) occupation[curSlot] = {};
-            occupation[curSlot][ta] = { row: row, isStart: placedSlots === 0 };
+            if (!occupation[curSlot][ta]) occupation[curSlot][ta] = [];
+            occupation[curSlot][ta].push({ row: row, isStart: placedSlots === 0 });
             placedSlots++; curSlot++;
           }
         });
@@ -3008,10 +3010,15 @@
         html += `<tr><td class="hour-cell">${timeLabel}</td>`;
         for (const ta of activeTAs()) {
           if (isPause) { html += `<td class="pause" style="font-size: 12px; padding: 6px;">PAUSE DÉJEUNER</td>`; continue; }
-          const occ = occupation[s] && occupation[s][ta];
-          if (occ) {
+          // v49b : occupation est un ARRAY
+          const occEntries = occupation[s] && occupation[s][ta];
+          if (occEntries && occEntries.length > 0) {
+            const startEntry = occEntries.find(e => e.isStart);
+            const occ = startEntry || occEntries[0];
             const r = occ.row; const taClass = ta.toLowerCase();
             const dataIdx = allInterventions.indexOf(r);
+            const cellInConflict = occEntries.length > 1;
+            const overlapClass = cellInConflict ? ' overlap-warning' : '';
             if (occ.isStart) {
               const client = r[COL.CLIENT] || '—';
               const forfait = r[COL.FORFAIT] || '';
@@ -3023,9 +3030,8 @@
               const pastille = vendeurInfo
                 ? `<span class="vendeur-pastille" style="background:${vendeurInfo.couleur};" title="${escapeHtml(vendeurInfo.nom)}"></span>`
                 : '';
-              // v49 : badge d'alerte si chevauchement
+              // v49b : badge global (au niveau intervention, pas cellule)
               const conflictClients = overlapConflicts.get(dataIdx);
-              const overlapClass = conflictClients ? ' overlap-warning' : '';
               const overlapBadge = conflictClients
                 ? `<span class="overlap-badge" title="⚠️ Chevauchement avec : ${escapeHtml(conflictClients.join(', '))}">⚠️</span>`
                 : '';
@@ -3039,8 +3045,6 @@
                 ${commentaireRaw ? `<span class="comment" title="${escapeHtml(commentaireRaw)}">💬 ${escapeHtml(commentaireShort)}</span>` : ''}
               </td>`;
             } else {
-              const conflictClients = overlapConflicts.get(dataIdx);
-              const overlapClass = conflictClients ? ' overlap-warning' : '';
               html += `<td class="occupied ${taClass} continuation${overlapClass}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"></td>`;
             }
           } else {
@@ -3155,10 +3159,11 @@
               if (h >= PAUSE_START && h < PAUSE_END) { curSlot++; continue; }
               // Si le jour de départ est férié, ne rien placer (l'intervention ne devrait pas être là)
               if (daysFerie[curDay]) break;
-              // Placer l'intervention
+              // Placer l'intervention (v49b : liste au lieu d'objet unique → gère les chevauchements)
               if (!occupation[curSlot]) occupation[curSlot] = {};
               if (!occupation[curSlot][curDay]) occupation[curSlot][curDay] = {};
-              occupation[curSlot][curDay][ta] = { row: row, isStart: placedSlots === 0 };
+              if (!occupation[curSlot][curDay][ta]) occupation[curSlot][curDay][ta] = [];
+              occupation[curSlot][curDay][ta].push({ row: row, isStart: placedSlots === 0 });
               placedSlots++;
               curSlot++;
             }
@@ -3181,10 +3186,18 @@
               continue;
             }
             if (isPause) { html += `<td class="pause">PAUSE</td>`; continue; }
-            const occ = occupation[s] && occupation[s][dayIdx] && occupation[s][dayIdx][ta];
-            if (occ) {
+            // v49b : occupation est maintenant un ARRAY d'entries (peut contenir plusieurs interventions en collision)
+            const occEntries = occupation[s] && occupation[s][dayIdx] && occupation[s][dayIdx][ta];
+            if (occEntries && occEntries.length > 0) {
+              // Prioriser une entrée "isStart" pour que le 2ème client reste visible en cas de chevauchement
+              const startEntry = occEntries.find(e => e.isStart);
+              const occ = startEntry || occEntries[0];
               const r = occ.row; const taClass = ta.toLowerCase();
               const dataIdx = allInterventions.indexOf(r);
+              // v49b : la classe overlap-warning ne s'applique QUE sur les cellules réellement en conflit
+              // (2+ interventions veulent occuper cette même cellule)
+              const cellInConflict = occEntries.length > 1;
+              const overlapClass = cellInConflict ? ' overlap-warning' : '';
               if (occ.isStart) {
                 const client = (r[COL.CLIENT] || '—').substring(0, 20);
                 const forfait = r[COL.FORFAIT] || '';
@@ -3198,9 +3211,9 @@
                 const commentaireHtml = commentaireRaw
                   ? `<span class="comment" title="${escapeHtml(commentaireRaw)}">💬 ${escapeHtml(commentaireShort)}</span>`
                   : '';
-                // v49 : badge d'alerte si chevauchement détecté avec d'autres interventions
+                // v49b : badge ⚠️ sur le start si l'intervention a été identifiée en collision globale
+                // (au niveau intervention, pas cellule) — indication au DM qu'il y a un souci
                 const conflictClients = overlapConflicts.get(dataIdx);
-                const overlapClass = conflictClients ? ' overlap-warning' : '';
                 const overlapBadge = conflictClients
                   ? `<span class="overlap-badge" title="⚠️ Chevauchement avec : ${escapeHtml(conflictClients.join(', '))}">⚠️</span>`
                   : '';
@@ -3209,8 +3222,6 @@
                   : '';
                 html += `<td class="occupied ${taClass} bloc-start${overlapClass}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"${overlapTitle}>${overlapBadge}<span class="client">${pastille}${escapeHtml(client)}</span><span class="forfait">${escapeHtml(forfait)}</span>${designation ? `<span class="designation">${escapeHtml(designation)}</span>` : ''}${commentaireHtml}</td>`;
               } else {
-                const conflictClients = overlapConflicts.get(dataIdx);
-                const overlapClass = conflictClients ? ' overlap-warning' : '';
                 html += `<td class="occupied ${taClass} continuation${overlapClass}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"></td>`;
               }
             } else {
