@@ -445,6 +445,7 @@
             <button class="compact" id="btn-add-urgence" style="background: #f59e0b;">⚡ Sans RDV</button>
             <button class="compact" id="btn-add-absence" style="background: #8b5cf6;">🏖️ Absence</button>
             <button class="compact" id="btn-manage-vendeurs" style="background: #0891b2;">⚙️ Vendeurs</button>
+            <button class="compact" id="btn-manage-techniciens" style="background: #7c3aed;">🧑 Techniciens</button>
             <button class="compact" id="btn-manage-pause" style="background: #ea580c;">🍴 Pause</button>
             <button class="compact" id="btn-presence-ta" style="background: #16a34a;">📍 Présence TA</button>
             <button class="secondary compact" id="btn-stats">📊 Stats</button>
@@ -570,6 +571,25 @@
       <div class="form-actions">
         <button class="secondary" id="btn-cancel-vendeurs">Annuler</button>
         <button id="btn-save-vendeurs">💾 Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALE TECHNICIENS (v47) -->
+  <div id="techniciens-modal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width: 520px;">
+      <h3>🧑 Gestion des techniciens</h3>
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+        Personnalisez le nom et la couleur d'accent de chaque technicien.<br>
+        Laissez le nom vide pour garder <strong>TA1</strong>, <strong>TA2</strong> ou <strong>TA3</strong>.
+      </p>
+      <div id="techniciens-list" class="vendeurs-list">
+        <!-- Construit dynamiquement, réutilise le style .vendeur-row -->
+      </div>
+      <div id="techniciens-feedback" class="form-feedback"></div>
+      <div class="form-actions">
+        <button class="secondary" id="btn-cancel-techniciens">Annuler</button>
+        <button id="btn-save-techniciens">💾 Enregistrer</button>
       </div>
     </div>
   </div>
@@ -1537,6 +1557,13 @@
       document.getElementById('vendeurs-modal').addEventListener('click', (e) => {
         if (e.target.id === 'vendeurs-modal') closeVendeursModal();
       });
+      // v47 : Techniciens
+      document.getElementById('btn-manage-techniciens').addEventListener('click', openTechniciensModal);
+      document.getElementById('btn-cancel-techniciens').addEventListener('click', closeTechniciensModal);
+      document.getElementById('btn-save-techniciens').addEventListener('click', submitTechniciensForm);
+      document.getElementById('techniciens-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'techniciens-modal') closeTechniciensModal();
+      });
       // Pause déjeuner
       document.getElementById('btn-manage-pause').addEventListener('click', openPauseModal);
       document.getElementById('btn-cancel-pause').addEventListener('click', closePauseModal);
@@ -2354,6 +2381,14 @@
       V4: { nom: 'Vendeur 4', couleur: '#f97316' }   // orange
     };
 
+    // v47 : personnalisation des techniciens (nom + couleur d'accent)
+    // Les couleurs par défaut reprennent celles de la charte planning (bleu, jaune, vert)
+    const TECHNICIEN_DEFAULTS = {
+      TA1: { nom: 'TA1', couleur: '#3b82f6' },  // bleu (comme --ta1-dark)
+      TA2: { nom: 'TA2', couleur: '#eab308' },  // jaune
+      TA3: { nom: 'TA3', couleur: '#10b981' }   // vert
+    };
+
     function defaultSiteConfig() {
       return {
         nbTA: 3,
@@ -2364,8 +2399,84 @@
           V2: { ...VENDEUR_DEFAULTS.V2 },
           V3: { ...VENDEUR_DEFAULTS.V3 },
           V4: { ...VENDEUR_DEFAULTS.V4 }
+        },
+        techniciens: {
+          TA1: { ...TECHNICIEN_DEFAULTS.TA1 },
+          TA2: { ...TECHNICIEN_DEFAULTS.TA2 },
+          TA3: { ...TECHNICIEN_DEFAULTS.TA3 }
         }
       };
+    }
+
+    // Helper : renvoie le nom d'affichage d'un TA (personnalisé si défini, sinon "TA1/TA2/TA3")
+    function getTaLabel(ta) {
+      if (!ta) return '';
+      const tech = siteConfig.techniciens && siteConfig.techniciens[ta];
+      const nom = (tech && tech.nom || '').trim();
+      // Si vide OU identique au code standard → on garde le code standard
+      if (!nom) return ta;
+      return nom;
+    }
+
+    // Helper : renvoie la couleur d'accent d'un TA (personnalisée si définie, sinon défaut)
+    function getTaColor(ta) {
+      if (!ta) return '#666666';
+      const tech = siteConfig.techniciens && siteConfig.techniciens[ta];
+      return (tech && tech.couleur) || (TECHNICIEN_DEFAULTS[ta] && TECHNICIEN_DEFAULTS[ta].couleur) || '#666666';
+    }
+
+    // Helpers couleur : éclaircir/assombrir un #RRGGBB par mix avec blanc/noir (amount 0..1)
+    function hexToRgb_(hex) {
+      const h = String(hex || '').replace('#', '');
+      if (h.length !== 6) return { r: 100, g: 100, b: 100 };
+      return { r: parseInt(h.slice(0,2), 16), g: parseInt(h.slice(2,4), 16), b: parseInt(h.slice(4,6), 16) };
+    }
+    function rgbToHex_(r, g, b) {
+      const c = v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0');
+      return '#' + c(r) + c(g) + c(b);
+    }
+    function lightenColor(hex, amount) {
+      const { r, g, b } = hexToRgb_(hex);
+      return rgbToHex_(r + (255 - r) * amount, g + (255 - g) * amount, b + (255 - b) * amount);
+    }
+    function darkenColor(hex, amount) {
+      const { r, g, b } = hexToRgb_(hex);
+      return rgbToHex_(r * (1 - amount), g * (1 - amount), b * (1 - amount));
+    }
+
+    // v47 : applique dynamiquement les couleurs personnalisées aux variables CSS
+    // Cela permet à tout le CSS existant (.ta-header.ta1, .occupied.ta1, .recap-card.ta1, etc.)
+    // de refléter automatiquement les nouvelles couleurs sans modification HTML.
+    function applyTechnicienColors() {
+      ['TA1', 'TA2', 'TA3'].forEach(tKey => {
+        const color = getTaColor(tKey);
+        const num = tKey.slice(2);  // '1', '2', '3'
+        const bgLight = lightenColor(color, 0.82);   // fond très clair
+        const border  = color;                        // couleur d'accent
+        const dark    = darkenColor(color, 0.35);    // texte / bordure foncée
+        document.documentElement.style.setProperty(`--ta${num}-bg`, bgLight);
+        document.documentElement.style.setProperty(`--ta${num}-border`, border);
+        document.documentElement.style.setProperty(`--ta${num}-dark`, dark);
+      });
+      // Mettre aussi à jour les labels des <select> qui listent TA1/TA2/TA3 en dur
+      refreshTaSelectLabels();
+    }
+
+    // Met à jour le texte affiché des <option> TA1/TA2/TA3 dans tous les <select> de la page
+    // On garde la value inchangée (TA1/TA2/TA3), seul le texte visible change.
+    function refreshTaSelectLabels() {
+      const selectIds = ['abs-ta', 'urg-ta', 'f-technicien', 'resched-ta'];
+      selectIds.forEach(id => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        Array.from(sel.options).forEach(opt => {
+          if (opt.value === 'TA1' || opt.value === 'TA2' || opt.value === 'TA3') {
+            const label = getTaLabel(opt.value);
+            // Si personnalisé, on affiche "Marc (TA1)" pour garder le repère technique
+            opt.textContent = (label === opt.value) ? opt.value : `${label} (${opt.value})`;
+          }
+        });
+      });
     }
 
     let siteConfig = defaultSiteConfig();
@@ -2397,21 +2508,32 @@
             if (!isNaN(n) && n >= WORK_HOURS_START && n <= WORK_HOURS_END) siteConfig.pauseFin = n;
           } else {
             // Lignes vendeurs : vendeur1_nom, vendeur1_couleur, vendeur2_nom, ...
-            const m = key.match(/^vendeur([1-4])_(nom|couleur)$/);
-            if (m) {
-              const vKey = 'V' + m[1];
-              const field = m[2];
+            const mv = key.match(/^vendeur([1-4])_(nom|couleur)$/);
+            if (mv) {
+              const vKey = 'V' + mv[1];
+              const field = mv[2];
               if (siteConfig.vendeurs[vKey]) {
                 siteConfig.vendeurs[vKey][field] = String(value || '').trim() || siteConfig.vendeurs[vKey][field];
+              }
+            }
+            // v47 : Lignes techniciens : ta1_nom, ta1_couleur, ta2_nom, ...
+            const mt = key.match(/^ta([1-3])_(nom|couleur)$/);
+            if (mt) {
+              const tKey = 'TA' + mt[1];
+              const field = mt[2];
+              if (siteConfig.techniciens[tKey]) {
+                siteConfig.techniciens[tKey][field] = String(value || '').trim() || siteConfig.techniciens[tKey][field];
               }
             }
           }
         });
         applyPauseConfig();
-        console.log(`[Config] nbTA = ${siteConfig.nbTA}, pause ${siteConfig.pauseDebut}-${siteConfig.pauseFin}, vendeurs chargés`);
+        applyTechnicienColors();
+        console.log(`[Config] nbTA = ${siteConfig.nbTA}, pause ${siteConfig.pauseDebut}-${siteConfig.pauseFin}, vendeurs + techniciens chargés`);
       } catch (err) {
         console.warn('[Config] Erreur chargement :', err.message);
         applyPauseConfig();
+        applyTechnicienColors();
       }
     }
 
@@ -2420,6 +2542,9 @@
       PAUSE_START = siteConfig.pauseDebut;
       PAUSE_END = siteConfig.pauseFin;
     }
+
+    // Le cas "pas de config chargée" : appliquer les couleurs par défaut au démarrage
+    // (avant même le fetchSiteConfig) → évite un flash de couleurs mal appliquées
 
     // Sauvegarde le nombre de TA actifs dans l'onglet CONFIG
     async function saveSiteConfigNbTA(nbTA) {
@@ -2472,6 +2597,19 @@
         const num = vKey.slice(1);  // '1', '2', etc.
         const ok1 = await saveConfigKey(`vendeur${num}_nom`, v.nom);
         const ok2 = await saveConfigKey(`vendeur${num}_couleur`, v.couleur);
+        if (!ok1 || !ok2) allOk = false;
+      }
+      return allOk;
+    }
+
+    // v47 : Sauvegarde tous les techniciens en une fois dans CONFIG
+    async function saveAllTechniciens() {
+      let allOk = true;
+      for (const tKey of ['TA1', 'TA2', 'TA3']) {
+        const t = siteConfig.techniciens[tKey];
+        const num = tKey.slice(2);  // '1', '2', '3'
+        const ok1 = await saveConfigKey(`ta${num}_nom`, t.nom);
+        const ok2 = await saveConfigKey(`ta${num}_couleur`, t.couleur);
         if (!ok1 || !ok2) allOk = false;
       }
       return allOk;
@@ -2778,7 +2916,7 @@
       let html = '<table class="planning"><thead>';
       html += '<tr><th class="day-header" style="width: 80px;">Heure</th>';
       activeTAs().forEach(ta => {
-        html += `<th class="ta-header ${ta.toLowerCase()}" style="font-size: 14px; padding: 12px;">${ta}</th>`;
+        html += `<th class="ta-header ${ta.toLowerCase()}" style="font-size: 14px; padding: 12px;" title="${ta}">${escapeHtml(getTaLabel(ta))}</th>`;
       });
       html += '</tr></thead><tbody>';
 
@@ -2879,7 +3017,7 @@
               ? '<span class="ta-presence present" title="TA présent ce jour">PR</span>'
               : '<span class="ta-presence absent" title="TA absent ce jour (saisie possible)">ABS</span>';
           }
-          html += `<th class="ta-header ${ta.toLowerCase()}">${ta}${presBadge}</th>`;
+          html += `<th class="ta-header ${ta.toLowerCase()}" title="${ta}">${escapeHtml(getTaLabel(ta))}${presBadge}</th>`;
         });
       }
       html += '</tr></thead><tbody>';
@@ -3067,7 +3205,7 @@
         // Ici on affiche toujours la carte d'un TA actif, même si 0h dispo.
         const tx = heuresDispo > 0 ? (c.heures / heuresDispo * 100) : 0;
         return `<div class="recap-card ${taClass}">` +
-          `<div class="recap-title">${taKey}</div>` +
+          `<div class="recap-title" title="${taKey}">${escapeHtml(getTaLabel(taKey))}</div>` +
           `<div class="recap-row"><span class="label">Heures réalisées</span><span class="value">${fmtH(c.heures)}</span></div>` +
           `<div class="recap-row recap-row-edit"><span class="label">Heures dispo</span>` +
             `<input type="number" class="recap-heures-input" data-ta="${taIdx}" value="${heuresDispo}" min="0" max="60" step="0.5" />` +
@@ -3334,7 +3472,7 @@
         ['N° client', r[COL.NUM_CLIENT] || '—'],
         ['Téléphone', r[COL.TEL] || '—'],
         ['Email', r[COL.EMAIL] || '—'],
-        ['Technicien', r[COL.TECHNICIEN] || '—'],
+        ['Technicien', r[COL.TECHNICIEN] ? getTaLabel(r[COL.TECHNICIEN]) : '—'],
         ['Vendeur', vendeurAffiche],
         ['Forfait', `${r[COL.FORFAIT] || ''} ${r[COL.DESIGNATION] ? '— ' + r[COL.DESIGNATION] : ''}`],
         ['Intervenant', r[COL.INTERVENANT] || '—'],
@@ -3968,7 +4106,7 @@
 
         html += `
           <div class="search-result-item" onclick="navigateToIntervention(${idx})">
-            <span class="search-result-ta ${taClass}">${ta}</span>
+            <span class="search-result-ta ${taClass}" title="${ta}">${escapeHtml(getTaLabel(ta))}</span>
             <div class="search-result-content">
               <div class="search-result-name">${escapeHtml(client)}</div>
               <div class="search-result-details">
@@ -4469,6 +4607,82 @@
     }
 
     // =====================================================
+    // TECHNICIENS (v47 : personnaliser nom + couleur des TA)
+    // =====================================================
+
+    function openTechniciensModal() {
+      const list = document.getElementById('techniciens-list');
+      list.innerHTML = '';
+      ['TA1', 'TA2', 'TA3'].forEach(tKey => {
+        const t = siteConfig.techniciens[tKey];
+        const num = tKey.slice(2);
+        // Si le nom stocké est le code lui-même, on l'affiche vide (comme un placeholder)
+        const displayNom = (t.nom === tKey) ? '' : t.nom;
+        const row = document.createElement('div');
+        row.className = 'vendeur-row';
+        row.innerHTML = `
+          <span class="vendeur-label" style="background:${t.couleur};color:#fff;">${tKey}</span>
+          <input type="text" id="tech-nom-${num}" value="${escapeHtml(displayNom)}" placeholder="Ex : Marc (vide = ${tKey})" maxlength="40">
+          <input type="color" id="tech-couleur-${num}" value="${t.couleur}" title="Couleur d'accent du technicien">
+        `;
+        list.appendChild(row);
+      });
+      document.getElementById('techniciens-feedback').className = 'form-feedback';
+      document.getElementById('techniciens-feedback').textContent = '';
+      document.getElementById('techniciens-modal').classList.remove('hidden');
+    }
+
+    function closeTechniciensModal() {
+      document.getElementById('techniciens-modal').classList.add('hidden');
+    }
+
+    async function submitTechniciensForm() {
+      const btn = document.getElementById('btn-save-techniciens');
+      btn.disabled = true;
+      btn.textContent = '⏳ Enregistrement...';
+
+      const showFB = (msg, type) => {
+        const el = document.getElementById('techniciens-feedback');
+        el.textContent = msg;
+        el.className = `form-feedback ${type}`;
+      };
+
+      try {
+        // Mettre à jour siteConfig en mémoire
+        ['TA1', 'TA2', 'TA3'].forEach(tKey => {
+          const num = tKey.slice(2);
+          // Nom vide = on stocke le code lui-même (comportement standard)
+          const nomInput = document.getElementById(`tech-nom-${num}`).value.trim();
+          const nom = nomInput || tKey;
+          const couleur = document.getElementById(`tech-couleur-${num}`).value || TECHNICIEN_DEFAULTS[tKey].couleur;
+          siteConfig.techniciens[tKey] = { nom, couleur };
+        });
+
+        showFB('💾 Sauvegarde...', 'info');
+        const ok = await saveAllTechniciens();
+
+        if (ok) {
+          // Appliquer immédiatement les nouvelles couleurs aux variables CSS
+          applyTechnicienColors();
+          showFB('✅ Techniciens enregistrés !', 'success');
+          setTimeout(() => {
+            closeTechniciensModal();
+            // Re-render planning : les en-têtes vont refléter les nouveaux noms + couleurs
+            renderPlanning();
+          }, 800);
+        } else {
+          showFB('⚠️ Sauvegarde partielle (onglet CONFIG manquant ?)', 'error');
+        }
+      } catch (err) {
+        console.error('Erreur sauvegarde techniciens :', err);
+        showFB('❌ ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '💾 Enregistrer';
+      }
+    }
+
+    // =====================================================
     // PAUSE DÉJEUNER (configurable par site)
     // =====================================================
 
@@ -4674,7 +4888,7 @@
         const row = document.createElement('div');
         row.className = 'presence-row';
         row.innerHTML = `
-          <div class="presence-ta-label ${taClass}">${ta}</div>
+          <div class="presence-ta-label ${taClass}" title="${ta}">${escapeHtml(getTaLabel(ta))}</div>
           <div class="presence-days">
             ${weekDates.map((d, i) => `
               <label class="presence-day ${presents.includes(i) ? 'checked' : ''}">
@@ -4808,7 +5022,7 @@
         html += `
           <div class="urgence-item">
             <div class="urgence-day">${dayLabel}</div>
-            <span class="urgence-ta-badge ${taClass}">${ta}</span>
+            <span class="urgence-ta-badge ${taClass}" title="${ta}">${escapeHtml(getTaLabel(ta))}</span>
             <div class="urgence-content">
               <div class="urgence-name">${escapeHtml(client)}</div>
               <div class="urgence-detail">
