@@ -91,6 +91,24 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    /* v49 : alerte visuelle sur les interventions qui se chevauchent */
+    table.planning td.occupied.overlap-warning {
+      box-shadow: inset 0 0 0 3px #f59e0b;   /* bordure orange épaisse à l'intérieur */
+      position: relative;
+    }
+    table.planning td.occupied.overlap-warning.continuation {
+      box-shadow: inset 0 0 0 3px #f59e0b;   /* même bordure sur les continuations */
+    }
+    table.planning td.occupied .overlap-badge {
+      position: absolute;
+      top: 2px;
+      right: 4px;
+      font-size: 14px;
+      line-height: 1;
+      z-index: 2;
+      cursor: help;
+      text-shadow: 0 0 3px white;             /* pour rester lisible sur tous les fonds */
+    }
     /* Modale présence TA (TA itinérants) */
     .presence-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; background: #f8fafc; }
     .presence-ta-label { flex-shrink: 0; padding: 8px 12px; border-radius: 6px; font-weight: 700; font-size: 13px; min-width: 50px; text-align: center; }
@@ -2858,6 +2876,65 @@
       return id.startsWith(URGENCE_ID_PREFIX);
     }
 
+    // v49 : détecte les chevauchements d'interventions
+    // Pour chaque intervention, calcule les cellules (dayIdx-ta-slot) qu'elle occupe visuellement,
+    // en tenant compte de la pause déjeuner et des jours fériés (débordement au jour ouvré suivant).
+    // Renvoie une Map<dataIdx, [autres clients en conflit]> pour les blocs qui ont des collisions.
+    function detectOverlaps(interventions, weekDates, daysFerie) {
+      const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
+      // Étape 1 : calculer l'empreinte de chaque intervention → set de "dayIdx-ta-slot"
+      const footprints = new Map();  // dataIdx → { cells: Set, client: string }
+      interventions.forEach(row => {
+        const dataIdx = allInterventions.indexOf(row);
+        if (dataIdx < 0) return;
+        const rowDate = serialToDate(row[COL.DATE]);
+        if (!rowDate) return;
+        const dayIdx = weekDates.findIndex(d => d.getTime() === rowDate.getTime());
+        if (dayIdx === -1) return;
+        const ta = row[COL.TECHNICIEN] || 'TA1';
+        const startSlot = (Number(row[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
+        const tempsTotal = Number(row[COL.TEMPS_TOTAL]) || Number(row[COL.TEMPS_REEL]) || SLOT_DURATION;
+        const slotsNeeded = Math.max(1, Math.ceil(tempsTotal / SLOT_DURATION));
+
+        // Simuler le placement (même logique que le rendu : saute pause + jours fériés)
+        const cells = new Set();
+        let curDay = dayIdx, curSlot = startSlot, placed = 0;
+        while (placed < slotsNeeded && curDay < weekDates.length) {
+          if (daysFerie && daysFerie[curDay]) { curDay++; curSlot = 0; continue; }
+          if (curSlot >= slotsCount) { curDay++; curSlot = 0; continue; }
+          const h = WORK_HOURS_START + curSlot * 0.5;
+          if (h >= PAUSE_START && h < PAUSE_END) { curSlot++; continue; }
+          cells.add(`${curDay}-${ta}-${curSlot}`);
+          curSlot++; placed++;
+        }
+        const clientName = row[COL.CLIENT] || '(sans nom)';
+        footprints.set(dataIdx, { cells, client: clientName });
+      });
+
+      // Étape 2 : détecter les collisions (paires d'interventions dont les empreintes se croisent)
+      const conflicts = new Map();  // dataIdx → Set de noms de clients en conflit
+      const ids = Array.from(footprints.keys());
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const a = footprints.get(ids[i]);
+          const b = footprints.get(ids[j]);
+          // Chevauchement si au moins une cellule commune
+          let hasOverlap = false;
+          for (const c of a.cells) { if (b.cells.has(c)) { hasOverlap = true; break; } }
+          if (hasOverlap) {
+            if (!conflicts.has(ids[i])) conflicts.set(ids[i], new Set());
+            if (!conflicts.has(ids[j])) conflicts.set(ids[j], new Set());
+            conflicts.get(ids[i]).add(b.client);
+            conflicts.get(ids[j]).add(a.client);
+          }
+        }
+      }
+      // Retourner une Map<dataIdx, [noms clients]> pour un affichage plus simple
+      const result = new Map();
+      conflicts.forEach((clientsSet, id) => result.set(id, Array.from(clientsSet)));
+      return result;
+    }
+
     function renderPlanningDay() {
       const dayIdx = currentViewDay;
       const date = new Date(selectedMonday);
@@ -2890,6 +2967,9 @@
       });
 
       const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
+
+      // v49 : détecter les chevauchements sur ce jour
+      const overlapConflicts = detectOverlaps(dayInterventions, [date], [isJourFerie(date)]);
 
       // Calculer l'occupation pour ce jour
       const occupation = {};
@@ -2943,14 +3023,25 @@
               const pastille = vendeurInfo
                 ? `<span class="vendeur-pastille" style="background:${vendeurInfo.couleur};" title="${escapeHtml(vendeurInfo.nom)}"></span>`
                 : '';
-              html += `<td class="occupied ${taClass} bloc-start" style="padding: 8px; font-size: 13px;" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})">
-                <span class="client" style="font-size: 14px;">${pastille}${escapeHtml(client)}</span>
+              // v49 : badge d'alerte si chevauchement
+              const conflictClients = overlapConflicts.get(dataIdx);
+              const overlapClass = conflictClients ? ' overlap-warning' : '';
+              const overlapBadge = conflictClients
+                ? `<span class="overlap-badge" title="⚠️ Chevauchement avec : ${escapeHtml(conflictClients.join(', '))}">⚠️</span>`
+                : '';
+              const overlapTitle = conflictClients
+                ? ` title="⚠️ Cette intervention chevauche : ${escapeHtml(conflictClients.join(', '))}"`
+                : '';
+              html += `<td class="occupied ${taClass} bloc-start${overlapClass}" style="padding: 8px; font-size: 13px;" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"${overlapTitle}>
+                ${overlapBadge}<span class="client" style="font-size: 14px;">${pastille}${escapeHtml(client)}</span>
                 <span class="forfait">${escapeHtml(forfait)}${designation ? ' - ' + escapeHtml(designation) : ''}</span>
                 ${vehicule ? `<span class="forfait">🚗 ${escapeHtml(vehicule)}</span>` : ''}
                 ${commentaireRaw ? `<span class="comment" title="${escapeHtml(commentaireRaw)}">💬 ${escapeHtml(commentaireShort)}</span>` : ''}
               </td>`;
             } else {
-              html += `<td class="occupied ${taClass} continuation" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"></td>`;
+              const conflictClients = overlapConflicts.get(dataIdx);
+              const overlapClass = conflictClients ? ' overlap-warning' : '';
+              html += `<td class="occupied ${taClass} continuation${overlapClass}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"></td>`;
             }
           } else {
             // Cellule vide - vérifier si absence
@@ -3022,6 +3113,10 @@
       }
       html += '</tr></thead><tbody>';
       const occupation = {};
+      // v49 : détecter les interventions qui se chevauchent pour afficher un badge d'alerte
+      // Renvoie une Map : dataIdx → liste des autres clients en conflit (pour le tooltip)
+      const overlapConflicts = detectOverlaps(weekInterventions, weekDates, daysFerie);
+
       // Placement avec gestion du débordement sur le jour suivant (même TA, J+1 ouvré max)
       // Saute les jours fériés en cherchant le prochain jour ouvré
       for (let dayIdx = 0; dayIdx < 6; dayIdx++) {
@@ -3103,9 +3198,20 @@
                 const commentaireHtml = commentaireRaw
                   ? `<span class="comment" title="${escapeHtml(commentaireRaw)}">💬 ${escapeHtml(commentaireShort)}</span>`
                   : '';
-                html += `<td class="occupied ${taClass} bloc-start" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"><span class="client">${pastille}${escapeHtml(client)}</span><span class="forfait">${escapeHtml(forfait)}</span>${designation ? `<span class="designation">${escapeHtml(designation)}</span>` : ''}${commentaireHtml}</td>`;
+                // v49 : badge d'alerte si chevauchement détecté avec d'autres interventions
+                const conflictClients = overlapConflicts.get(dataIdx);
+                const overlapClass = conflictClients ? ' overlap-warning' : '';
+                const overlapBadge = conflictClients
+                  ? `<span class="overlap-badge" title="⚠️ Chevauchement avec : ${escapeHtml(conflictClients.join(', '))}">⚠️</span>`
+                  : '';
+                const overlapTitle = conflictClients
+                  ? ` title="⚠️ Cette intervention chevauche : ${escapeHtml(conflictClients.join(', '))}"`
+                  : '';
+                html += `<td class="occupied ${taClass} bloc-start${overlapClass}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"${overlapTitle}>${overlapBadge}<span class="client">${pastille}${escapeHtml(client)}</span><span class="forfait">${escapeHtml(forfait)}</span>${designation ? `<span class="designation">${escapeHtml(designation)}</span>` : ''}${commentaireHtml}</td>`;
               } else {
-                html += `<td class="occupied ${taClass} continuation" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"></td>`;
+                const conflictClients = overlapConflicts.get(dataIdx);
+                const overlapClass = conflictClients ? ' overlap-warning' : '';
+                html += `<td class="occupied ${taClass} continuation${overlapClass}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"></td>`;
               }
             } else {
               // Cellule vide - vérifier si absence
