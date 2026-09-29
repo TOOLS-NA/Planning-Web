@@ -1880,7 +1880,14 @@
     // L'API GitHub fournit la date du dernier commit. On la compare à celle
     // mémorisée en localStorage : si elle a changé, c'est qu'une nouvelle version
     // a été publiée → badge clignotant sur le bouton MAJ.
-    const GITHUB_COMMITS_API = 'https://api.github.com/repos/pierrenarb/Planning-Web/commits?per_page=1';
+    // v49b : détection automatique du repo à surveiller selon l'URL de la PWA
+    //   - tools-na.github.io/Planning-Web/  → repo TOOLS-NA/Planning-Web
+    //   - pierrenarb.github.io/Planning-Web/ → repo pierrenarb/Planning-Web (fallback historique)
+    const GITHUB_REPO = window.location.hostname.includes('tools-na')
+      ? 'TOOLS-NA/Planning-Web'
+      : 'pierrenarb/Planning-Web';
+    const GITHUB_COMMITS_API = `https://api.github.com/repos/${GITHUB_REPO}/commits?per_page=1`;
+    console.log(`[MAJ] Surveillance du repo : ${GITHUB_REPO}`);
     let updateCheckInProgress = false;
 
     async function checkForUpdate() {
