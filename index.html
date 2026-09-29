@@ -190,6 +190,9 @@
     .form-row label.required::after { content: ' *'; color: #dc2626; }
     .form-row input, .form-row select, .form-row textarea { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; background: white; }
     .form-row input:focus, .form-row select:focus, .form-row textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
+    /* v49c : contraindre le resize des textarea pour éviter que la modale devienne géante
+       et que le bouton Valider soit rejeté hors de la fenêtre. */
+    .form-row textarea { resize: vertical; min-height: 42px; max-height: 180px; width: 100%; box-sizing: border-box; }
     .form-row .field-hint { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
     .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; padding-top: 12px; border-top: 1px solid #f1f5f9; flex-wrap: wrap; }
     .form-actions button { font-size: 13px; padding: 8px 14px; }
