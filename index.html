@@ -3708,38 +3708,59 @@
       openAddForm(null);
     }
 
+    // v48 : Recherche robuste d'un forfait à partir d'une saisie utilisateur.
+    // Gère TOUS les formats de codes présents dans l'assortiment, y compris ceux avec espaces
+    // comme "SAV 1". Stratégie en cascade :
+    //   1. Match direct (trim + uppercase)          → "SAV 1" ou "FP127"
+    //   2. Match insensible aux espaces internes    → "fp 127" retrouve "FP127"
+    //   3. Match sans casse et sans espaces (dernier recours)
+    // Renvoie { forfait, canonicalCode } si trouvé, ou null sinon.
+    function findForfait(rawValue) {
+      const trimmed = (rawValue || '').trim();
+      if (!trimmed) return null;
+      const upper = trimmed.toUpperCase();
+
+      // 1. Match direct sur code exact (respecte les espaces internes)
+      let f = assortiment.find(x => (x.code || '').toUpperCase() === upper);
+      if (f) return { forfait: f, canonicalCode: f.code };
+
+      // 2. Match sans espaces internes des deux côtés (fallback)
+      const stripped = upper.replace(/\s+/g, '');
+      f = assortiment.find(x => (x.code || '').toUpperCase().replace(/\s+/g, '') === stripped);
+      if (f) return { forfait: f, canonicalCode: f.code };
+
+      return null;
+    }
+
     function updateForfaitInfo() {
       const input = document.getElementById('f-forfait');
       const rawValue = (input.value || '').trim();
-      // v46 : normaliser la saisie manuelle (uppercase + supprimer espaces internes)
-      // Ex : "fp127" → "FP127", "fp 127" → "FP127"
-      const code = rawValue.toUpperCase().replace(/\s+/g, '');
       const fidelite = document.getElementById('f-fidelite').value;
       const info = document.getElementById('f-forfait-info');
-      if (!code) {
+      if (!rawValue) {
         info.textContent = 'Prix : — • Durée : —';
         info.style.color = '';
         refreshMopaSelect('');
         return;
       }
-      const f = assortiment.find(x => x.code === code);
-      if (!f) {
-        // Ne pas encore forcer la casse tant que le vendeur tape (l'input peut être partiel)
+      const match = findForfait(rawValue);
+      if (!match) {
         info.textContent = `⚠️ Code « ${rawValue} » introuvable dans l'assortiment`;
         info.style.color = '#dc2626';
         refreshMopaSelect('');
         return;
       }
-      // Match trouvé : normaliser le champ pour éviter les erreurs à l'enregistrement
-      if (input.value !== code) {
-        input.value = code;
+      // Match trouvé : forcer le champ vers le code canonique de l'assortiment
+      // (préserve les espaces si le vrai code est "SAV 1")
+      if (input.value !== match.canonicalCode) {
+        input.value = match.canonicalCode;
       }
       info.style.color = '';
+      const f = match.forfait;
       const remise = (fidelite === 'OUI') ? 0.9 : 1;
       const prix = (f.prix * remise).toFixed(2).replace('.', ',');
       info.textContent = `Prix : ${prix} € • Durée : ${f.duree} h`;
-      // Rafraîchir le sélecteur MOPA selon le forfait choisi
-      refreshMopaSelect(code);
+      refreshMopaSelect(match.canonicalCode);
     }
 
     // Filtre les MOPAs selon le code forfait (ex: FP04 → MOPA04 + "Aucun")
@@ -3843,20 +3864,21 @@
         const slotStart = parseInt(document.getElementById('f-heure').value);
         const dureeInput = document.getElementById('f-duree').value;
         const client = document.getElementById('f-client').value.trim();
-        // v46 : normaliser la saisie forfait (uppercase + suppression espaces)
+        // v48 : recherche robuste via findForfait (gère les codes avec espaces comme "SAV 1")
         const forfaitRaw = document.getElementById('f-forfait').value.trim();
-        const forfaitCode = forfaitRaw.toUpperCase().replace(/\s+/g, '');
-        // Aligner le champ visuellement
-        if (forfaitRaw && forfaitCode !== forfaitRaw) {
-          document.getElementById('f-forfait').value = forfaitCode;
-        }
 
         // Validation
         if (!client) throw new Error('Le client est obligatoire');
-        if (!forfaitCode) throw new Error('Le forfait est obligatoire');
+        if (!forfaitRaw) throw new Error('Le forfait est obligatoire');
 
-        const forfaitData = assortiment.find(f => f.code === forfaitCode);
-        if (!forfaitData) throw new Error(`Forfait « ${forfaitCode} » introuvable dans l'assortiment. Vérifiez la saisie.`);
+        const match = findForfait(forfaitRaw);
+        if (!match) throw new Error(`Forfait « ${forfaitRaw} » introuvable dans l'assortiment. Vérifiez la saisie.`);
+        const forfaitData = match.forfait;
+        const forfaitCode = match.canonicalCode;
+        // Aligner le champ visuellement sur le code canonique
+        if (document.getElementById('f-forfait').value !== forfaitCode) {
+          document.getElementById('f-forfait').value = forfaitCode;
+        }
 
         const dureePrevue = forfaitData.duree;
         const tempsReel = dureeInput ? Number(dureeInput) : dureePrevue;
@@ -5127,19 +5149,19 @@
     function updateUrgenceForfaitInfo() {
       const input = document.getElementById('urg-forfait');
       const rawValue = (input.value || '').trim();
-      // v46 : normaliser la saisie manuelle (uppercase + supprimer espaces)
-      const code = rawValue.toUpperCase().replace(/\s+/g, '');
       const info = document.getElementById('urg-forfait-info');
-      if (!code) { info.textContent = 'Prix : — • Durée : —'; info.style.color = ''; return; }
-      const f = assortiment.find(x => x.code === code);
-      if (!f) {
+      if (!rawValue) { info.textContent = 'Prix : — • Durée : —'; info.style.color = ''; return; }
+      // v48 : findForfait gère tous les formats de codes (avec ou sans espaces)
+      const match = findForfait(rawValue);
+      if (!match) {
         info.textContent = `⚠️ Code « ${rawValue} » introuvable dans l'assortiment`;
         info.style.color = '#dc2626';
         return;
       }
-      // Match trouvé : normaliser le champ
-      if (input.value !== code) input.value = code;
+      // Match trouvé : forcer le champ vers le code canonique
+      if (input.value !== match.canonicalCode) input.value = match.canonicalCode;
       info.style.color = '';
+      const f = match.forfait;
       const prix = f.prix.toFixed(2).replace('.', ',');
       info.textContent = `Prix : ${prix} € • Durée : ${f.duree} h`;
     }
@@ -5192,19 +5214,20 @@
       try {
         const jourIdx = parseInt(document.getElementById('urg-jour').value);
         const ta = document.getElementById('urg-ta').value;
-        // v46 : normaliser la saisie manuelle du forfait
+        // v48 : findForfait gère tous les formats de codes (avec ou sans espaces)
         const forfaitRaw = document.getElementById('urg-forfait').value.trim();
-        const forfaitCode = forfaitRaw.toUpperCase().replace(/\s+/g, '');
-        if (forfaitRaw && forfaitCode !== forfaitRaw) {
-          document.getElementById('urg-forfait').value = forfaitCode;
-        }
         const client = document.getElementById('urg-client').value.trim();
 
-        if (!forfaitCode) throw new Error('Forfait obligatoire');
+        if (!forfaitRaw) throw new Error('Forfait obligatoire');
         if (!client) throw new Error('Client obligatoire');
 
-        const f = assortiment.find(x => x.code === forfaitCode);
-        if (!f) throw new Error(`Forfait « ${forfaitCode} » introuvable dans l'assortiment. Vérifiez la saisie.`);
+        const match = findForfait(forfaitRaw);
+        if (!match) throw new Error(`Forfait « ${forfaitRaw} » introuvable dans l'assortiment. Vérifiez la saisie.`);
+        const f = match.forfait;
+        const forfaitCode = match.canonicalCode;
+        if (document.getElementById('urg-forfait').value !== forfaitCode) {
+          document.getElementById('urg-forfait').value = forfaitCode;
+        }
 
         // Date = jour sélectionné de la semaine
         const date = new Date(selectedMonday);
