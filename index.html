@@ -706,6 +706,7 @@
         <select id="pause-select">
           <option value="12-13">12:00 → 13:00 (1h)</option>
           <option value="12-13.5">12:00 → 13:30 (1h30)</option>
+          <option value="12-14">12:00 → 14:00 (2h)</option>
           <option value="12.5-13.5">12:30 → 13:30 (1h)</option>
           <option value="12.5-14">12:30 → 14:00 (1h30)</option>
           <option value="13-14">13:00 → 14:00 (1h)</option>
@@ -1018,11 +1019,18 @@
             <label class="required" for="f-client">Client</label>
             <input type="text" id="f-client" placeholder="Nom du client">
           </div>
-          <div class="form-row">
-            <label class="required" for="f-forfait">Forfait <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(tapez le code ou cliquez la flèche)</span></label>
-            <input type="text" id="f-forfait" list="f-forfait-list" placeholder="Ex : FP127 — ou cherchez par mot-clé" autocomplete="off">
-            <datalist id="f-forfait-list"></datalist>
-            <div class="field-hint" id="f-forfait-info">Prix : — • Durée : —</div>
+          <div class="form-row cols-2">
+            <div class="form-row" style="flex: 3;">
+              <label class="required" for="f-forfait">Forfait <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(tapez le code ou cliquez la flèche)</span></label>
+              <input type="text" id="f-forfait" list="f-forfait-list" placeholder="Ex : FP127 — ou cherchez par mot-clé" autocomplete="off">
+              <datalist id="f-forfait-list"></datalist>
+              <div class="field-hint" id="f-forfait-info">Prix : — • Durée : —</div>
+            </div>
+            <div class="form-row" style="flex: 1; max-width: 110px;">
+              <label for="f-quantite">Quantité</label>
+              <input type="number" id="f-quantite" step="1" min="1" max="99" value="1" title="Ex : 3 pour poser 3× le même forfait">
+              <div class="field-hint">× le forfait</div>
+            </div>
           </div>
         </div>
       </div>
@@ -3726,6 +3734,7 @@
 
       // Réinitialiser les champs
       document.getElementById('f-duree').value = '';
+      document.getElementById('f-quantite').value = '1';   // v50 : reset quantité
       document.getElementById('f-client').value = '';
       document.getElementById('f-numClient').value = '';
       document.getElementById('f-tel').value = '';
@@ -3984,6 +3993,8 @@
         const client = document.getElementById('f-client').value.trim();
         // v48 : recherche robuste via findForfait (gère les codes avec espaces comme "SAV 1")
         const forfaitRaw = document.getElementById('f-forfait').value.trim();
+        // v50 : quantité (multiplie durée + CA + PFA + recyclage)
+        const quantite = Math.max(1, Math.min(99, parseInt(document.getElementById('f-quantite').value) || 1));
 
         // Validation
         if (!client) throw new Error('Le client est obligatoire');
@@ -3998,7 +4009,8 @@
           document.getElementById('f-forfait').value = forfaitCode;
         }
 
-        const dureePrevue = forfaitData.duree;
+        // v50 : si quantité > 1, on multiplie la durée prévue AVANT calcul des gains/CA
+        const dureePrevue = forfaitData.duree * quantite;
         const tempsReel = dureeInput ? Number(dureeInput) : dureePrevue;
         if (!tempsReel || tempsReel <= 0) throw new Error('Durée invalide');
 
@@ -4018,11 +4030,13 @@
         // Calculer la colonne du Sheet (selon TA et jour)
         const colSheet = DAY_COL_MAP[dayIdx][technicien];
 
-        // Calculs financiers
+        // Calculs financiers (v50 : × quantité pour CA, prix net, PFA, recyclage)
         const fideliteOui = document.getElementById('f-fidelite').value === 'OUI';
         const fppec2Oui = document.getElementById('f-fppec2').value === 'OUI';
-        const caForfait = fideliteOui ? Math.round(forfaitData.prix * 0.9 * 100) / 100 : forfaitData.prix;
-        const prixNetFinal = fideliteOui ? Math.round(forfaitData.prixNet * 0.9 * 100) / 100 : forfaitData.prixNet;
+        const caUnitaire = fideliteOui ? Math.round(forfaitData.prix * 0.9 * 100) / 100 : forfaitData.prix;
+        const caForfait = Math.round(caUnitaire * quantite * 100) / 100;
+        const prixNetUnit = fideliteOui ? Math.round(forfaitData.prixNet * 0.9 * 100) / 100 : forfaitData.prixNet;
+        const prixNetFinal = Math.round(prixNetUnit * quantite * 100) / 100;
         const gainH = Math.max(0, Math.round((dureePrevue - tempsReel) * 100) / 100);
         const gainE = Math.round(gainH * (caForfait / (dureePrevue || 1)) * 100) / 100;
         const caFppec2 = fppec2Oui ? FPPEC2_PRIX : 0;
@@ -4065,11 +4079,11 @@
           document.getElementById('f-intervenant').value || '', // L
           fideliteOui ? 'OUI' : 'NON',                        // M : Fidélité
           document.getElementById('f-commentaire').value || '', // N
-          caForfait,                                          // O : CA forfait
-          forfaitData.pfa,                                    // P : Dont PFA
-          forfaitData.recyclage,                              // Q : Dont recyclage
-          prixNetFinal,                                       // R : Prix net forfait
-          dureePrevue,                                        // S : Durée prévue
+          caForfait,                                          // O : CA forfait (× quantité)
+          Math.round(forfaitData.pfa * quantite * 100) / 100,       // P : Dont PFA (× quantité)
+          Math.round(forfaitData.recyclage * quantite * 100) / 100, // Q : Dont recyclage (× quantité)
+          prixNetFinal,                                       // R : Prix net forfait (× quantité)
+          dureePrevue,                                        // S : Durée prévue (déjà × quantité)
           tempsTotal,                                         // T : Temps total
           gainH,                                              // U : Gain prod h
           gainE,                                              // V : Gain prod €
@@ -4143,9 +4157,10 @@
             heureSelect.value = nextSlot;
           }
 
-          // Vider uniquement Forfait + Durée pour saisir le 2e forfait
+          // Vider uniquement Forfait + Durée + Quantité pour saisir le 2e forfait
           document.getElementById('f-forfait').value = '';
           document.getElementById('f-duree').value = '';
+          document.getElementById('f-quantite').value = '1';  // v50 : reset quantité
           updateForfaitInfo();
 
           // Réactiver le bouton et focus sur le forfait
@@ -4835,7 +4850,7 @@
       if (debut === fin) currentValue = 'none';
       else currentValue = `${debut}-${fin}`;
       // Si la valeur n'est pas dans la liste, on garde 12-13 comme défaut visuel
-      const validValues = ['12-13', '12-13.5', '12.5-13.5', '12.5-14', '13-14', 'none'];
+      const validValues = ['12-13', '12-13.5', '12-14', '12.5-13.5', '12.5-14', '13-14', 'none'];
       sel.value = validValues.includes(currentValue) ? currentValue : '12-13';
 
       document.getElementById('pause-feedback').className = 'form-feedback';
