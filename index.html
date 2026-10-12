@@ -78,6 +78,25 @@
     /* v51 : jour fermé semaine — même structure que .ferie mais palette gris neutre */
     table.planning td.ferie.ferme-week { background: repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 6px, #e2e8f0 6px, #e2e8f0 12px); color: #475569; }
     table.planning td.ferie.ferme-week:hover { background: repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 6px, #e2e8f0 6px, #e2e8f0 12px); }
+    /* v53 : tranche horaire grisée manuellement — fond uni gris, non cliquable */
+    table.planning td.slot.horaire-gris { background: #cbd5e1; cursor: not-allowed; }
+    table.planning td.slot.horaire-gris:hover { background: #cbd5e1; }
+    /* v53 : grille de la modale Horaires */
+    table.horaires-grid th, table.horaires-grid td { border: 1px solid #e2e8f0; padding: 4px 6px; text-align: center; }
+    table.horaires-grid thead th { background: #f8fafc; font-weight: 700; position: sticky; top: 0; z-index: 2; }
+    table.horaires-grid td.hour-label { background: #f8fafc; font-weight: 600; font-size: 11px; color: var(--text-muted); width: 60px; }
+    table.horaires-grid td.hgrid-pause { background: var(--pause-bg); color: #475569; font-size: 10px; font-style: italic; }
+    table.horaires-grid td.hgrid-slot { cursor: pointer; height: 24px; user-select: none; transition: background 0.1s; }
+    table.horaires-grid td.hgrid-slot:hover { background: #e0e7ff; }
+    table.horaires-grid td.hgrid-slot.gris { background: #cbd5e1 !important; }
+    table.horaires-grid td.hgrid-slot.gris:hover { background: #94a3b8 !important; }
+    table.horaires-grid td.hgrid-slot.locked { background: repeating-linear-gradient(45deg, #fee2e2, #fee2e2 3px, #fecaca 3px, #fecaca 6px); cursor: not-allowed; }
+    table.horaires-grid td.hgrid-slot.locked:hover { background: repeating-linear-gradient(45deg, #fee2e2, #fee2e2 3px, #fecaca 3px, #fecaca 6px); }
+    .horaires-day-tab { padding: 6px 14px; border: 1px solid var(--border); background: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text); }
+    .horaires-day-tab:hover { background: #f1f5f9; }
+    .horaires-day-tab.active { background: #475569; color: #fff; border-color: #475569; }
+    .horaires-day-tab.has-gris::after { content: ' •'; color: #cbd5e1; font-weight: 900; }
+    .horaires-day-tab.active.has-gris::after { color: #fff; }
     table.planning thead .day-header.ferie-header { background: #fee2e2; color: #991b1b; }
     table.planning thead .day-header.ferie-header::after { content: ' 🚫'; }
     table.planning td.occupied { cursor: pointer; padding: 4px 6px; font-size: 11px; line-height: 1.3; text-align: left; }
@@ -470,6 +489,7 @@
             <button class="compact" id="btn-manage-pause" style="background: #ea580c;">🍴 Pause</button>
             <button class="compact" id="btn-manage-jours-fermes" style="background: #991b1b;" title="Jours de la semaine fermés sur longue période (ex: fermé le lundi)">🚷 Jours fermés</button>
             <button class="compact" id="btn-presence-ta" style="background: #16a34a;">📍 Présence TA</button>
+            <button class="compact" id="btn-manage-horaires" style="background: #475569;" title="Griser manuellement des tranches horaires sur la semaine affichée">🕒 Horaires</button>
             <button class="secondary compact" id="btn-stats">📊 Stats</button>
             <button class="secondary compact" id="btn-refresh">🔄 Rafraîchir</button>
             <button class="secondary compact" id="btn-maj" title="Vérifier les mises à jour de l'application">🔄 MAJ</button>
@@ -766,6 +786,44 @@
       <div class="form-actions">
         <button class="secondary" id="btn-cancel-presence">Annuler</button>
         <button id="btn-save-presence">💾 Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALE HORAIRES GRIS (v53 : griser des tranches semaine par semaine) -->
+  <div id="horaires-modal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width: 780px; max-height: 92vh; display: flex; flex-direction: column;">
+      <h3>🕒 Griser des tranches horaires</h3>
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">
+        Pour la <strong id="horaires-week-info">semaine en cours</strong>, cliquez sur les créneaux à <strong>griser</strong> (indisponibles).
+        Un créneau grisé est non cliquable et aucune intervention ne peut y être placée. Les créneaux déjà occupés sont ignorés.
+      </p>
+
+      <!-- Onglets jour -->
+      <div id="horaires-day-tabs" style="display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap;"></div>
+
+      <!-- Grille du jour sélectionné -->
+      <div style="flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
+        <table class="horaires-grid" id="horaires-grid-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <!-- Construit dynamiquement -->
+        </table>
+      </div>
+
+      <div style="font-size: 12px; color: var(--text-muted); margin-top: 10px; display: flex; gap: 16px; flex-wrap: wrap;">
+        <span><span style="display:inline-block;width:14px;height:14px;background:#cbd5e1;border:1px solid #94a3b8;vertical-align:middle;margin-right:4px;"></span>Grisé (indisponible)</span>
+        <span><span style="display:inline-block;width:14px;height:14px;background:#fff;border:1px solid #e2e8f0;vertical-align:middle;margin-right:4px;"></span>Libre</span>
+        <span><span style="display:inline-block;width:14px;height:14px;background:repeating-linear-gradient(45deg,#fee2e2,#fee2e2 3px,#fecaca 3px,#fecaca 6px);border:1px solid #fca5a5;vertical-align:middle;margin-right:4px;"></span>Déjà occupé (verrouillé)</span>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center;">
+        <button class="secondary compact" id="btn-horaires-clear-day">🗙 Tout dégriser (ce jour)</button>
+        <button class="secondary compact" id="btn-horaires-clear-week">🗙 Tout dégriser (semaine entière)</button>
+      </div>
+
+      <div id="horaires-feedback" class="form-feedback"></div>
+      <div class="form-actions">
+        <button class="secondary" id="btn-cancel-horaires">Annuler</button>
+        <button id="btn-save-horaires" style="background: #475569;">💾 Enregistrer</button>
       </div>
     </div>
   </div>
@@ -1498,6 +1556,10 @@
     // Les nombres sont les indices de jour (0=Lundi, 5=Samedi).
     // Si aucune entrée pour un TA/semaine donné → TA considéré présent tous les jours (comportement par défaut).
     let presenceTaCache = {};
+    // v53 : cache des tranches horaires grisées manuellement par semaine / TA / jour
+    //   { 'S41_2026': { TA1: { 0: [4,5,6], 3: [10,11] }, TA2: {...} }, ... }
+    //   Les nombres dans les listes sont des indices de SLOT (0 = 08:00, 1 = 08:30, …)
+    let horairesGrisCache = {};
     let currentEditContext = null;  // Données du clic pour pré-remplir le formulaire
     let editingDataIdx = null;  // Index de l'intervention en cours d'édition (null si nouveau)
     let donneesSheetGid = null;  // GID de l'onglet DONNEES_OK (pour suppression de ligne)
@@ -1673,6 +1735,15 @@
       document.getElementById('btn-save-presence').addEventListener('click', submitPresenceTaForm);
       document.getElementById('presence-modal').addEventListener('click', (e) => {
         if (e.target.id === 'presence-modal') closePresenceTaModal();
+      });
+      // v53 : Horaires grisés manuellement
+      document.getElementById('btn-manage-horaires').addEventListener('click', openHorairesModal);
+      document.getElementById('btn-cancel-horaires').addEventListener('click', closeHorairesModal);
+      document.getElementById('btn-save-horaires').addEventListener('click', submitHorairesForm);
+      document.getElementById('btn-horaires-clear-day').addEventListener('click', clearHorairesForCurrentDay);
+      document.getElementById('btn-horaires-clear-week').addEventListener('click', clearHorairesForWeek);
+      document.getElementById('horaires-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'horaires-modal') closeHorairesModal();
       });
       // Onglets du graphique
       document.querySelectorAll('.stats-tab').forEach(tab => {
@@ -2133,6 +2204,7 @@
       heuresTaCache = {};
       absencesCache = [];
       presenceTaCache = {};
+      horairesGrisCache = {};  // v53
       siteConfig = defaultSiteConfig();
       const defaults = (SITES[siteKey].defaultHeuresTA) || [35, 35, 35];
       heuresTaCurrent = [...defaults];
@@ -2175,6 +2247,7 @@
       fetchAbsences().catch(e => console.warn('Absences:', e));
       fetchSiteConfig().catch(e => console.warn('Config:', e));
       fetchPresenceTa().catch(e => console.warn('PresenceTA:', e));
+      fetchHorairesGris().catch(e => console.warn('HorairesGris:', e));  // v53
     }
 
     function logout() {
@@ -3114,7 +3187,16 @@
       if (newFp.length < newSlotsNeeded) {
         return { feasible: false, reason: 'La nouvelle intervention dépasse les horaires de la journée.' };
       }
+      // v53 : refuser si l'empreinte de la nouvelle intervention touche une tranche grisée
+      const grisSlots = getHoraireGrisSlots(ta, dayIdx);
+      const grisOnNewFp = newFp.filter(s => grisSlots.includes(s));
+      if (grisOnNewFp.length > 0) {
+        const times = grisOnNewFp.map(s => slotToTimeLabel(s)).join(', ');
+        return { feasible: false, reason: `Le créneau choisi contient une tranche grisée manuellement (${times}). Choisissez un autre horaire.` };
+      }
       const occupied = new Set(newFp);
+      // v53 : les tranches grisées manuellement sont considérées comme occupées pour la cascade
+      grisSlots.forEach(s => occupied.add(s));
 
       const steps = [];
       for (const item of existing) {
@@ -3321,6 +3403,11 @@
               html += `<td class="occupied ${taClass} continuation${overlapClass}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"></td>`;
             }
           } else {
+            // v53 : tranche grisée manuellement → non cliquable, fond uni gris
+            if (isSlotHoraireGris(ta, dayIdx, s)) {
+              html += `<td class="slot horaire-gris" style="height: 40px; min-width: 200px;" title="Tranche grisée manuellement"></td>`;
+              continue;
+            }
             // Cellule vide - vérifier si absence
             const abs = getAbsence(date, ta);
             if (abs) {
@@ -3504,6 +3591,11 @@
                 html += `<td class="occupied ${taClass} continuation${overlapClass}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"></td>`;
               }
             } else {
+              // v53 : tranche grisée manuellement → non cliquable, fond uni gris
+              if (isSlotHoraireGris(ta, dayIdx, s)) {
+                html += `<td class="slot horaire-gris" title="Tranche grisée manuellement"></td>`;
+                continue;
+              }
               // Cellule vide - vérifier si absence
               const abs = dayAbsence(dayIdx, ta);
               if (abs) {
@@ -3807,8 +3899,8 @@
           throw new Error('Impossible de reprogrammer sur un jour férié.');
         }
         if (isJourFermeSemaine(newDate)) {
-          const dayIdx = (newDate.getDay() + 6) % 7;
-          throw new Error(`Impossible de reprogrammer sur un ${DAYS[dayIdx].toLowerCase()} : jour fermé en permanence.`);
+          const dIdx = (newDate.getDay() + 6) % 7;
+          throw new Error(`Impossible de reprogrammer sur un ${DAYS[dIdx].toLowerCase()} : jour fermé en permanence.`);
         }
 
         // Convertir heure en slot (30 min chacun)
@@ -3849,6 +3941,9 @@
         const clickedOldSlot = (Number(r[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
         const slotDelta = newSlot - clickedOldSlot;
 
+        // v53 : récupérer les tranches grisées pour (jour cible, TA cible)
+        const grisSlotsOnDest = getHoraireGrisSlots(newTA, dayIdx);
+
         // Pré-calculer + valider chaque update avant d'écrire quoi que ce soit
         const updates = [];
         for (const idx of members) {
@@ -3867,6 +3962,18 @@
           if (newHour >= PAUSE_START && newHour < PAUSE_END) {
             const label = (member[COL.FORFAIT] || '—');
             throw new Error(`Après décalage, le forfait "${label}" tomberait pendant la pause (${newHour.toFixed(1)}h). Choisissez une heure plus adaptée.`);
+          }
+          // v53 : vérifier qu'aucun slot de l'empreinte ne tombe sur une tranche grisée
+          if (grisSlotsOnDest.length > 0) {
+            const temps = Number(member[COL.TEMPS_TOTAL]) || Number(member[COL.TEMPS_REEL]) || SLOT_DURATION;
+            const slotsNeeded = Math.max(1, Math.ceil(temps / SLOT_DURATION));
+            const fp = footprintOnDay(newSlotForMember, slotsNeeded);
+            const hit = fp.filter(s => grisSlotsOnDest.includes(s));
+            if (hit.length > 0) {
+              const label = (member[COL.FORFAIT] || '—');
+              const times = hit.map(s => slotToTimeLabel(s)).join(', ');
+              throw new Error(`Le forfait "${label}" tomberait sur une tranche grisée (${times}). Choisissez un autre créneau.`);
+            }
           }
           const updatedRow = [...member];
           updatedRow[COL.DATE] = dateToSerial(newDate);
@@ -5429,6 +5536,164 @@
       }
     }
 
+    // =====================================================
+    // v53 : HORAIRES GRISÉS MANUELLEMENT (par semaine, par TA, par jour, par slot)
+    // =====================================================
+    // Stockage onglet HORAIRES_GRIS : 4 colonnes "Semaine | TA | Jour | Slots"
+    //   Semaine : S18_2026
+    //   TA : TA1 / TA2 / TA3
+    //   Jour : 0..5 (Lundi=0)
+    //   Slots : "4,5,6" (indices de slot — 0 = 08:00, 2 = 09:00, etc.)
+
+    async function fetchHorairesGris() {
+      horairesGrisCache = {};
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/HORAIRES_GRIS!A:D?valueRenderOption=UNFORMATTED_VALUE`;
+      try {
+        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+        if (!res.ok) {
+          console.warn('[HorairesGris] Onglet HORAIRES_GRIS introuvable, aucune tranche grisée');
+          return;
+        }
+        const data = await res.json();
+        const rows = data.values || [];
+        rows.forEach((r, idx) => {
+          if (idx === 0 && typeof r[0] === 'string' && r[0].toLowerCase().includes('semaine')) return;
+          const semaine = String(r[0] || '').trim();
+          const ta = String(r[1] || '').trim().toUpperCase();
+          const jourStr = String(r[2] !== undefined ? r[2] : '').trim();
+          const jour = parseInt(jourStr, 10);
+          const slotsStr = String(r[3] || '').trim();
+          if (!semaine || !ta || isNaN(jour)) return;
+          const slots = slotsStr === ''
+            ? []
+            : slotsStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n >= 0);
+          if (!horairesGrisCache[semaine]) horairesGrisCache[semaine] = {};
+          if (!horairesGrisCache[semaine][ta]) horairesGrisCache[semaine][ta] = {};
+          horairesGrisCache[semaine][ta][jour] = slots;
+        });
+        console.log(`[HorairesGris] ${rows.length - 1} entrées chargées`);
+      } catch (err) {
+        console.warn('[HorairesGris] Erreur chargement :', err.message);
+      }
+    }
+
+    // Renvoie true si le slot (TA, jour, slot) est grisé pour la semaine courante
+    function isSlotHoraireGris(ta, dayIdx, slot) {
+      const weekKey = getCurrentWeekKey();
+      if (!weekKey) return false;
+      const taEntry = horairesGrisCache[weekKey] && horairesGrisCache[weekKey][ta];
+      if (!taEntry) return false;
+      const dayList = taEntry[dayIdx];
+      return dayList ? dayList.includes(slot) : false;
+    }
+
+    // Récupère la liste des slots grisés pour (semaine courante, TA, jour)
+    function getHoraireGrisSlots(ta, dayIdx) {
+      const weekKey = getCurrentWeekKey();
+      if (!weekKey) return [];
+      const taEntry = horairesGrisCache[weekKey] && horairesGrisCache[weekKey][ta];
+      if (!taEntry) return [];
+      return taEntry[dayIdx] || [];
+    }
+
+    // Sauvegarde toutes les tranches grisées de la semaine courante en une seule passe.
+    // `fullMap` : { TA1: { 0: [4,5], 1: [10] }, TA2: {...}, TA3: {...} }
+    // Écrit UNE ligne par (TA, jour) existant ou avec des slots. Les absents sont nettoyés.
+    async function saveHorairesGrisForWeek(fullMap) {
+      const weekKey = getCurrentWeekKey();
+      if (!weekKey) return false;
+      try {
+        // 1) Lire tout l'onglet pour trouver les lignes de cette semaine et les mettre à jour / supprimer
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/HORAIRES_GRIS!A:D?valueRenderOption=UNFORMATTED_VALUE`;
+        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+        if (!res.ok) {
+          alert('⚠️ L\'onglet HORAIRES_GRIS est manquant dans le Sheets.\n\nCréez un onglet HORAIRES_GRIS avec en-têtes : Semaine | TA | Jour | Slots');
+          return false;
+        }
+        const data = await res.json();
+        const rows = data.values || [];
+        // Index : (TA_jour) → row number dans Sheets (1-based)
+        const existingRows = {};  // "TA1_0" → 5 (ligne 5)
+        for (let i = 0; i < rows.length; i++) {
+          const s = String(rows[i][0] || '').trim();
+          const t = String(rows[i][1] || '').trim().toUpperCase();
+          const j = parseInt(String(rows[i][2] !== undefined ? rows[i][2] : '').trim(), 10);
+          if (s === weekKey && t && !isNaN(j)) {
+            existingRows[`${t}_${j}`] = i + 1;  // ligne Sheets 1-based
+          }
+        }
+        // 2) Collecter les updates (PUT) et les appends (POST)
+        const puts = [];       // { range, values }
+        const appends = [];    // [[weekKey, ta, jour, slotsStr]]
+        const keysToKeep = new Set();
+        for (const ta of ['TA1', 'TA2', 'TA3']) {
+          const taMap = (fullMap && fullMap[ta]) || {};
+          for (let j = 0; j < 6; j++) {
+            const slots = taMap[j] || [];
+            // Si pas de slots ET pas d'entrée existante → rien à faire
+            if (slots.length === 0 && !existingRows[`${ta}_${j}`]) continue;
+            keysToKeep.add(`${ta}_${j}`);
+            const slotsStr = slots.sort((a, b) => a - b).join(',');
+            const row = [weekKey, ta, j, slotsStr];
+            if (existingRows[`${ta}_${j}`]) {
+              const sheetRow = existingRows[`${ta}_${j}`];
+              puts.push({
+                range: `HORAIRES_GRIS!A${sheetRow}:D${sheetRow}`,
+                values: [row]
+              });
+            } else {
+              appends.push(row);
+            }
+          }
+        }
+        // 3) Les lignes existantes qu'on n'a PAS mises à jour mais qui concernent cette semaine → vider les slots (set to "")
+        for (const key of Object.keys(existingRows)) {
+          if (!keysToKeep.has(key)) {
+            const sheetRow = existingRows[key];
+            const [ta, jStr] = key.split('_');
+            puts.push({
+              range: `HORAIRES_GRIS!A${sheetRow}:D${sheetRow}`,
+              values: [[weekKey, ta, parseInt(jStr, 10), '']]
+            });
+          }
+        }
+        // 4) Exécuter les PUT en batchUpdate
+        if (puts.length > 0) {
+          const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values:batchUpdate`;
+          const bRes = await fetch(batchUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ valueInputOption: 'RAW', data: puts })
+          });
+          if (!bRes.ok) throw new Error(`HTTP ${bRes.status} (batchUpdate)`);
+        }
+        // 5) Exécuter l'append en une seule fois pour toutes les nouvelles entrées
+        if (appends.length > 0) {
+          const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/HORAIRES_GRIS!A:D:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+          const aRes = await fetch(appendUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: appends })
+          });
+          if (!aRes.ok) throw new Error(`HTTP ${aRes.status} (append)`);
+        }
+        // 6) MàJ cache local
+        if (!horairesGrisCache[weekKey]) horairesGrisCache[weekKey] = {};
+        for (const ta of ['TA1', 'TA2', 'TA3']) {
+          horairesGrisCache[weekKey][ta] = {};
+          const taMap = (fullMap && fullMap[ta]) || {};
+          for (let j = 0; j < 6; j++) {
+            const slots = taMap[j] || [];
+            if (slots.length > 0) horairesGrisCache[weekKey][ta][j] = [...slots];
+          }
+        }
+        return true;
+      } catch (err) {
+        console.error('[HorairesGris] Erreur sauvegarde :', err);
+        return false;
+      }
+    }
+
     // Renvoie true si le TA est présent ce jour-là (selon la semaine courante).
     // Si pas d'entrée dans le cache pour la semaine/TA, par défaut le TA est présent.
     function isTaPresent(ta, dayIdx) {
@@ -5587,6 +5852,194 @@
         }
       } catch (err) {
         console.error('Erreur sauvegarde présence :', err);
+        showFB('❌ ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '💾 Enregistrer';
+      }
+    }
+
+    // =====================================================
+    // v53 : MODALE HORAIRES GRISÉS — UI (grille jour par jour)
+    // =====================================================
+    // État local pendant l'édition : { TA1: { 0:[4,5], 3:[10] }, ... }
+    let horairesGrisDraft = null;
+    let horairesCurrentDay = 0;  // Jour affiché dans la modale (0..5)
+
+    // Renvoie l'ensemble des slots occupés par une intervention existante pour (jour, TA)
+    // → ces slots ne peuvent pas être grisés (verrouillés)
+    function getOccupiedSlotsForDayTa(dayIdx, ta) {
+      if (!selectedMonday) return new Set();
+      const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
+      const date = new Date(selectedMonday);
+      date.setDate(selectedMonday.getDate() + dayIdx);
+      const dateSerial = dateToSerial(date);
+      const occupied = new Set();
+      allInterventions.forEach(row => {
+        if (!row) return;
+        if (isFilRouge(row) || isUrgence(row)) return;
+        if (row[COL.DATE] !== dateSerial) return;
+        if ((row[COL.TECHNICIEN] || 'TA1') !== ta) return;
+        const startSlot = (Number(row[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
+        const temps = Number(row[COL.TEMPS_TOTAL]) || Number(row[COL.TEMPS_REEL]) || SLOT_DURATION;
+        const slotsNeeded = Math.max(1, Math.ceil(temps / SLOT_DURATION));
+        const fp = footprintOnDay(startSlot, slotsNeeded);
+        fp.forEach(s => occupied.add(s));
+      });
+      return occupied;
+    }
+
+    function openHorairesModal() {
+      if (!selectedMonday) {
+        alert('Sélectionnez d\'abord une semaine dans le calendrier.');
+        return;
+      }
+      const weekKey = getCurrentWeekKey();
+      const m = weekKey ? weekKey.match(/^S(\d+)_(\d+)$/) : null;
+      const weekLabel = m ? `Semaine ${m[1]} - ${m[2]}` : 'Semaine en cours';
+      document.getElementById('horaires-week-info').textContent = weekLabel;
+
+      // Charger l'état courant dans le draft
+      horairesGrisDraft = { TA1: {}, TA2: {}, TA3: {} };
+      const current = horairesGrisCache[weekKey] || {};
+      for (const ta of ['TA1', 'TA2', 'TA3']) {
+        if (current[ta]) {
+          for (const j of Object.keys(current[ta])) {
+            horairesGrisDraft[ta][parseInt(j, 10)] = [...current[ta][j]];
+          }
+        }
+      }
+      horairesCurrentDay = 0;
+
+      renderHorairesTabs();
+      renderHorairesGrid();
+
+      document.getElementById('horaires-feedback').className = 'form-feedback';
+      document.getElementById('horaires-feedback').textContent = '';
+      document.getElementById('horaires-modal').classList.remove('hidden');
+    }
+
+    function closeHorairesModal() {
+      horairesGrisDraft = null;
+      document.getElementById('horaires-modal').classList.add('hidden');
+    }
+
+    // Un onglet par jour, avec indicateur "a des slots grisés"
+    function renderHorairesTabs() {
+      const container = document.getElementById('horaires-day-tabs');
+      const weekDates = [];
+      for (let i = 0; i < 6; i++) {
+        const d = new Date(selectedMonday); d.setDate(selectedMonday.getDate() + i);
+        weekDates.push(d);
+      }
+      const fmt = (d) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+      let html = '';
+      for (let i = 0; i < 6; i++) {
+        const hasGris = ['TA1', 'TA2', 'TA3'].some(ta => (horairesGrisDraft[ta][i] || []).length > 0);
+        const active = i === horairesCurrentDay ? ' active' : '';
+        const grisCls = hasGris ? ' has-gris' : '';
+        html += `<button class="horaires-day-tab${active}${grisCls}" data-day="${i}">${DAYS[i]}<br><small style="font-weight:400;">${fmt(weekDates[i])}</small></button>`;
+      }
+      container.innerHTML = html;
+      container.querySelectorAll('.horaires-day-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          horairesCurrentDay = parseInt(btn.dataset.day, 10);
+          renderHorairesTabs();
+          renderHorairesGrid();
+        });
+      });
+    }
+
+    // Grille du jour courant : 3 TA en colonnes, slots en lignes
+    function renderHorairesGrid() {
+      const table = document.getElementById('horaires-grid-table');
+      const tas = activeTAs();
+      const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
+      let html = '<thead><tr><th>Heure</th>';
+      tas.forEach(ta => html += `<th>${escapeHtml(getTaLabel(ta))}</th>`);
+      html += '</tr></thead><tbody>';
+
+      // Pré-calculer les slots occupés (verrouillés) par TA pour ce jour
+      const lockedByTa = {};
+      tas.forEach(ta => { lockedByTa[ta] = getOccupiedSlotsForDayTa(horairesCurrentDay, ta); });
+
+      for (let s = 0; s < slotsCount; s++) {
+        const h = WORK_HOURS_START + s * 0.5;
+        const timeLabel = slotToTimeLabel(s);
+        const isPause = (h >= PAUSE_START && h < PAUSE_END);
+        html += `<tr><td class="hour-label">${timeLabel}</td>`;
+        for (const ta of tas) {
+          if (isPause) {
+            html += `<td class="hgrid-pause">PAUSE</td>`;
+            continue;
+          }
+          const locked = lockedByTa[ta].has(s);
+          const grise = (horairesGrisDraft[ta][horairesCurrentDay] || []).includes(s);
+          const cls = locked ? 'hgrid-slot locked' : (grise ? 'hgrid-slot gris' : 'hgrid-slot');
+          const title = locked ? 'Créneau déjà occupé par une intervention' : (grise ? 'Grisé — cliquez pour dégriser' : 'Cliquez pour griser');
+          html += `<td class="${cls}" data-ta="${ta}" data-slot="${s}" title="${title}"></td>`;
+        }
+        html += '</tr>';
+      }
+      html += '</tbody>';
+      table.innerHTML = html;
+
+      // Clic sur une case → toggle (sauf locked)
+      table.querySelectorAll('.hgrid-slot:not(.locked)').forEach(td => {
+        td.addEventListener('click', () => {
+          const ta = td.dataset.ta;
+          const slot = parseInt(td.dataset.slot, 10);
+          if (!horairesGrisDraft[ta][horairesCurrentDay]) horairesGrisDraft[ta][horairesCurrentDay] = [];
+          const list = horairesGrisDraft[ta][horairesCurrentDay];
+          const idx = list.indexOf(slot);
+          if (idx >= 0) list.splice(idx, 1);
+          else list.push(slot);
+          td.classList.toggle('gris');
+          // Si plus de slots grisés → supprimer la clé
+          if (list.length === 0) delete horairesGrisDraft[ta][horairesCurrentDay];
+          renderHorairesTabs();  // mettre à jour l'indicateur "has-gris"
+        });
+      });
+    }
+
+    function clearHorairesForCurrentDay() {
+      for (const ta of ['TA1', 'TA2', 'TA3']) {
+        delete horairesGrisDraft[ta][horairesCurrentDay];
+      }
+      renderHorairesTabs();
+      renderHorairesGrid();
+    }
+
+    function clearHorairesForWeek() {
+      if (!confirm('Dégriser toutes les tranches de la semaine ?')) return;
+      horairesGrisDraft = { TA1: {}, TA2: {}, TA3: {} };
+      renderHorairesTabs();
+      renderHorairesGrid();
+    }
+
+    async function submitHorairesForm() {
+      const btn = document.getElementById('btn-save-horaires');
+      btn.disabled = true;
+      btn.textContent = '⏳ Enregistrement...';
+      const showFB = (msg, type) => {
+        const el = document.getElementById('horaires-feedback');
+        el.textContent = msg;
+        el.className = `form-feedback ${type}`;
+      };
+      try {
+        showFB('💾 Sauvegarde...', 'info');
+        const ok = await saveHorairesGrisForWeek(horairesGrisDraft);
+        if (ok) {
+          showFB('✅ Horaires grisés enregistrés !', 'success');
+          setTimeout(() => {
+            closeHorairesModal();
+            renderPlanning();
+          }, 600);
+        } else {
+          showFB('⚠️ Sauvegarde partielle (onglet HORAIRES_GRIS manquant ?)', 'error');
+        }
+      } catch (err) {
+        console.error('Erreur sauvegarde horaires :', err);
         showFB('❌ ' + err.message, 'error');
       } finally {
         btn.disabled = false;
