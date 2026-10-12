@@ -75,6 +75,9 @@
     table.planning td.pause:hover { background: var(--pause-bg); }
     table.planning td.ferie { background: repeating-linear-gradient(45deg, #fee2e2, #fee2e2 6px, #fecaca 6px, #fecaca 12px); cursor: not-allowed; color: #991b1b; font-style: italic; font-size: 10px; font-weight: 600; }
     table.planning td.ferie:hover { background: repeating-linear-gradient(45deg, #fee2e2, #fee2e2 6px, #fecaca 6px, #fecaca 12px); }
+    /* v51 : jour fermé semaine — même structure que .ferie mais palette gris neutre */
+    table.planning td.ferie.ferme-week { background: repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 6px, #e2e8f0 6px, #e2e8f0 12px); color: #475569; }
+    table.planning td.ferie.ferme-week:hover { background: repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 6px, #e2e8f0 6px, #e2e8f0 12px); }
     table.planning thead .day-header.ferie-header { background: #fee2e2; color: #991b1b; }
     table.planning thead .day-header.ferie-header::after { content: ' 🚫'; }
     table.planning td.occupied { cursor: pointer; padding: 4px 6px; font-size: 11px; line-height: 1.3; text-align: left; }
@@ -465,6 +468,7 @@
             <button class="compact" id="btn-manage-vendeurs" style="background: #0891b2;">⚙️ Vendeurs</button>
             <button class="compact" id="btn-manage-techniciens" style="background: #7c3aed;">🧑 Techniciens</button>
             <button class="compact" id="btn-manage-pause" style="background: #ea580c;">🍴 Pause</button>
+            <button class="compact" id="btn-manage-jours-fermes" style="background: #991b1b;" title="Jours de la semaine fermés sur longue période (ex: fermé le lundi)">🚷 Jours fermés</button>
             <button class="compact" id="btn-presence-ta" style="background: #16a34a;">📍 Présence TA</button>
             <button class="secondary compact" id="btn-stats">📊 Stats</button>
             <button class="secondary compact" id="btn-refresh">🔄 Rafraîchir</button>
@@ -622,6 +626,15 @@
 
       <div id="reschedule-summary" style="background: #f8fafc; border-left: 4px solid #059669; padding: 10px 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; color: var(--text);"></div>
 
+      <!-- v51 : section groupe (même client + même jour + même TA) -->
+      <div id="reschedule-group-section" class="hidden" style="background: #fffbeb; border-left: 4px solid #d97706; padding: 10px 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px;">
+        <div id="reschedule-group-info" style="color: var(--text); margin-bottom: 8px;"></div>
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; color: #92400e;">
+          <input type="checkbox" id="resched-group-all" style="width: 16px; height: 16px; cursor: pointer;" checked>
+          <span>📦 Appliquer à tout le groupe (même décalage pour toutes les interventions)</span>
+        </label>
+      </div>
+
       <div class="form-row">
         <label for="resched-date" class="required">Nouvelle date</label>
         <input type="date" id="resched-date">
@@ -717,6 +730,25 @@
       <div class="form-actions">
         <button class="secondary" id="btn-cancel-pause">Annuler</button>
         <button id="btn-save-pause">💾 Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALE JOURS FERMÉS (v51 : jours de la semaine fermés sur longue période) -->
+  <div id="jours-fermes-modal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width: 520px;">
+      <h3>🚷 Jours fermés (longue période)</h3>
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+        Cochez les jours de la semaine où l'atelier est <strong>fermé en permanence</strong> (ex: Lons fermé le lundi).<br>
+        Les jours cochés apparaissent en gris sur le planning et aucune intervention ne peut y être placée.
+      </p>
+      <div id="jours-fermes-list" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
+        <!-- 6 lignes construites dynamiquement : Lundi → Samedi -->
+      </div>
+      <div id="jours-fermes-feedback" class="form-feedback"></div>
+      <div class="form-actions">
+        <button class="secondary" id="btn-cancel-jours-fermes">Annuler</button>
+        <button id="btn-save-jours-fermes" style="background: #991b1b;">💾 Enregistrer</button>
       </div>
     </div>
   </div>
@@ -1614,6 +1646,13 @@
       document.getElementById('pause-modal').addEventListener('click', (e) => {
         if (e.target.id === 'pause-modal') closePauseModal();
       });
+      // v51 : Jours fermés longue période
+      document.getElementById('btn-manage-jours-fermes').addEventListener('click', openJoursFermesModal);
+      document.getElementById('btn-cancel-jours-fermes').addEventListener('click', closeJoursFermesModal);
+      document.getElementById('btn-save-jours-fermes').addEventListener('click', submitJoursFermesForm);
+      document.getElementById('jours-fermes-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'jours-fermes-modal') closeJoursFermesModal();
+      });
       // Scope reconnexion (erreur OAuth)
       document.getElementById('btn-scope-reconnect').addEventListener('click', scopeReconnect);
       document.getElementById('btn-scope-reconnect-2').addEventListener('click', scopeReconnect);
@@ -2421,6 +2460,9 @@
         nbTA: 3,
         pauseDebut: 12,   // Heure de début pause déjeuner (12 = 12:00)
         pauseFin: 13,     // Heure de fin pause déjeuner (13 = 13:00). Si == pauseDebut → pas de pause
+        // v51 : jours fermés sur longue période. Indices 0..5 (0=Lundi, 5=Samedi).
+        // Ex: [0] = Lons fermé le lundi en permanence.
+        joursFermes: [],
         vendeurs: {
           V1: { ...VENDEUR_DEFAULTS.V1 },
           V2: { ...VENDEUR_DEFAULTS.V2 },
@@ -2533,6 +2575,16 @@
           } else if (key === 'pause_fin') {
             const n = parseFloat(value);
             if (!isNaN(n) && n >= WORK_HOURS_START && n <= WORK_HOURS_END) siteConfig.pauseFin = n;
+          } else if (key === 'jours_fermes') {
+            // v51 : liste d'indices 0..5 (0=Lundi, 5=Samedi) séparés par virgule — ex: "0,3"
+            const raw = String(value || '').trim();
+            if (raw === '') {
+              siteConfig.joursFermes = [];
+            } else {
+              siteConfig.joursFermes = raw.split(',')
+                .map(s => parseInt(s.trim(), 10))
+                .filter(n => !isNaN(n) && n >= 0 && n <= 5);
+            }
           } else {
             // Lignes vendeurs : vendeur1_nom, vendeur1_couleur, vendeur2_nom, ...
             const mv = key.match(/^vendeur([1-4])_(nom|couleur)$/);
@@ -2819,6 +2871,28 @@
       return joursFeries.includes(dateOnly);
     }
 
+    // v51 : jours fermés sur longue période (ex: Lons fermé le lundi).
+    // Basé sur l'index du jour de la semaine (0=Lundi, 5=Samedi).
+    function isJourFermeSemaine(date) {
+      if (!date) return false;
+      if (!siteConfig.joursFermes || siteConfig.joursFermes.length === 0) return false;
+      const dayIdx = (date.getDay() + 6) % 7;  // 0=Lundi
+      return siteConfig.joursFermes.includes(dayIdx);
+    }
+
+    // v51 : regroupe les deux motifs d'indisponibilité (férié OU fermé semaine).
+    // Utilisé pour toute la logique de rendu / blocage de saisie.
+    function isDayBlocked(date) {
+      return isJourFerie(date) || isJourFermeSemaine(date);
+    }
+
+    // v51 : renvoie { blocked, type, label } pour le rendu/affichage.
+    function getDayBlockInfo(date) {
+      if (isJourFerie(date)) return { blocked: true, type: 'ferie', label: 'FÉRIÉ', emoji: '🚫' };
+      if (isJourFermeSemaine(date)) return { blocked: true, type: 'ferme', label: 'FERMÉ', emoji: '🚷' };
+      return { blocked: false };
+    }
+
     function serialToDate(serial) {
       if (typeof serial !== 'number') return null;
       const baseDate = new Date(Date.UTC(1899, 11, 30));
@@ -2859,7 +2933,9 @@
         const opt = document.createElement('option');
         opt.value = i;
         const label = `${DAYS[i]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
-        opt.textContent = isJourFerie(d) ? `${label} 🚫` : label;
+        // v51 : jour férié OU jour fermé semaine → suffixe emoji
+        const info = getDayBlockInfo(d);
+        opt.textContent = info.blocked ? `${label} ${info.emoji}` : label;
         daySelect.appendChild(opt);
       }
       daySelect.value = currentViewDay;
@@ -2883,6 +2959,34 @@
       if (!row) return false;
       const id = String(row[COL.ID] || '');
       return id.startsWith(URGENCE_ID_PREFIX);
+    }
+
+    // v51 : trouve toutes les interventions du MÊME groupe que l'intervention passée.
+    // Un groupe = même client + même date + même technicien.
+    // Les fils rouges et urgences ne sont jamais groupés.
+    // Renvoie un tableau d'indices (incluant celui passé en paramètre), trié par ROW croissant.
+    function findGroupMembers(dataIdx) {
+      const r = allInterventions[dataIdx];
+      if (!r) return [dataIdx];
+      if (isFilRouge(r) || isUrgence(r)) return [dataIdx];
+      const client = String(r[COL.CLIENT] || '').trim();
+      const dateSerial = r[COL.DATE];
+      const ta = r[COL.TECHNICIEN] || 'TA1';
+      if (!client) return [dataIdx];  // Sans nom client, on ne groupe pas
+      const members = [];
+      allInterventions.forEach((other, idx) => {
+        if (!other) return;
+        if (isFilRouge(other) || isUrgence(other)) return;
+        const oClient = String(other[COL.CLIENT] || '').trim();
+        const oDate = other[COL.DATE];
+        const oTa = other[COL.TECHNICIEN] || 'TA1';
+        if (oClient === client && oDate === dateSerial && oTa === ta) {
+          members.push(idx);
+        }
+      });
+      // Trier par ROW croissant (ordre chronologique du bloc)
+      members.sort((a, b) => (allInterventions[a][COL.ROW] || 0) - (allInterventions[b][COL.ROW] || 0));
+      return members;
     }
 
     // v49 : détecte les chevauchements d'interventions
@@ -2951,12 +3055,18 @@
       const fmt = (d) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
       document.getElementById('week-info').textContent = `${DAYS[dayIdx]} ${fmt(date)}`;
 
-      const isFerie = isJourFerie(date);
-
-      // Si jour férié, afficher juste un message
-      if (isFerie) {
+      // v51 : jour férié OU jour fermé semaine → bandeau d'info à la place du planning
+      const blockInfo = getDayBlockInfo(date);
+      if (blockInfo.blocked) {
+        const bgPattern = blockInfo.type === 'ferie'
+          ? 'repeating-linear-gradient(45deg, #fee2e2, #fee2e2 10px, #fecaca 10px, #fecaca 20px)'
+          : 'repeating-linear-gradient(45deg, #f3f4f6, #f3f4f6 10px, #e5e7eb 10px, #e5e7eb 20px)';
+        const textColor = blockInfo.type === 'ferie' ? '#991b1b' : '#475569';
+        const msg = blockInfo.type === 'ferie'
+          ? '🚫 Jour férié - Atelier fermé'
+          : '🚷 Atelier fermé le ' + DAYS[dayIdx].toLowerCase();
         document.getElementById('planning-content').innerHTML =
-          `<div class="loader" style="background: repeating-linear-gradient(45deg, #fee2e2, #fee2e2 10px, #fecaca 10px, #fecaca 20px); color: #991b1b; font-weight: 700; font-size: 16px; padding: 60px;">🚫 Jour férié - Atelier fermé</div>`;
+          `<div class="loader" style="background: ${bgPattern}; color: ${textColor}; font-weight: 700; font-size: 16px; padding: 60px;">${msg}</div>`;
         return;
       }
 
@@ -2977,8 +3087,8 @@
 
       const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
 
-      // v49 : détecter les chevauchements sur ce jour
-      const overlapConflicts = detectOverlaps(dayInterventions, [date], [isJourFerie(date)]);
+      // v49 : détecter les chevauchements sur ce jour (v51 : inclut jours fermés semaine)
+      const overlapConflicts = detectOverlaps(dayInterventions, [date], [isDayBlocked(date)]);
 
       // Calculer l'occupation pour ce jour
       const occupation = {};
@@ -3102,8 +3212,11 @@
       const fmt = (d) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
       document.getElementById('week-info').textContent = `Semaine du ${fmt(weekDates[0])} au ${fmt(weekDates[5])}`;
       const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
-      // Pré-calculer si chaque jour est férié
-      const daysFerie = weekDates.map(d => isJourFerie(d));
+      // Pré-calculer si chaque jour est bloqué (v51 : férié OU fermé semaine)
+      const daysBlocked = weekDates.map(d => isDayBlocked(d));
+      const daysBlockInfo = weekDates.map(d => getDayBlockInfo(d));
+      // Alias conservé pour la logique de débordement et detectOverlaps
+      const daysFerie = daysBlocked;
       const tas = activeTAs();  // TA actifs selon config du site
       let html = '<table class="planning"><thead><tr><th class="day-header" rowspan="2">Heure</th>';
       weekDates.forEach((d, i) => {
@@ -3189,9 +3302,12 @@
         html += `<tr><td class="hour-cell">${timeLabel}</td>`;
         for (let dayIdx = 0; dayIdx < 6; dayIdx++) {
           for (const ta of activeTAs()) {
-            // Jour férié : cellule grisée non cliquable
+            // Jour férié OU fermé semaine (v51) : cellule grisée non cliquable
             if (daysFerie[dayIdx]) {
-              html += `<td class="ferie">${(s === 0 && ta === tas[0]) ? 'FÉRIÉ' : ''}</td>`;
+              const bi = daysBlockInfo[dayIdx];
+              const bLabel = bi.type === 'ferme' ? 'FERMÉ' : 'FÉRIÉ';
+              const bClass = bi.type === 'ferme' ? 'ferie ferme-week' : 'ferie';
+              html += `<td class="${bClass}">${(s === 0 && ta === tas[0]) ? bLabel : ''}</td>`;
               continue;
             }
             if (isPause) { html += `<td class="pause">PAUSE</td>`; continue; }
@@ -3428,6 +3544,7 @@
     // =====================================================
 
     let reschedulingDataIdx = null;
+    let reschedulingGroupMembers = [];  // v51 : indices des membres du groupe (incluant celui cliqué)
 
     function openRescheduleModal(dataIdx) {
       const r = allInterventions[dataIdx];
@@ -3452,6 +3569,34 @@
       document.getElementById('reschedule-summary').innerHTML =
         `<strong>${escapeHtml(client)}</strong> — ${escapeHtml(forfait)}${designation ? ' · ' + escapeHtml(designation) : ''}<br>` +
         `<span style="color: var(--text-muted); font-size: 12px;">Actuellement : ${dateStr} · ${currentTA} · ${timeStr}</span>`;
+
+      // v51 : détecter le groupe (même client + même date + même TA)
+      reschedulingGroupMembers = findGroupMembers(dataIdx);
+      const groupSection = document.getElementById('reschedule-group-section');
+      const groupInfo = document.getElementById('reschedule-group-info');
+      const groupCheckbox = document.getElementById('resched-group-all');
+      if (reschedulingGroupMembers.length > 1) {
+        // Lister les forfaits du groupe (ordre par heure)
+        const items = reschedulingGroupMembers.map(idx => {
+          const m = allInterventions[idx];
+          const mSlot = (Number(m[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
+          const mH = WORK_HOURS_START + mSlot * 0.5;
+          const mHH = Math.floor(mH); const mMM = (mH - mHH) * 60;
+          const mTime = `${String(mHH).padStart(2,'0')}:${String(mMM).padStart(2,'0')}`;
+          const mForfait = m[COL.FORFAIT] || '—';
+          return `${mTime} · ${escapeHtml(mForfait)}`;
+        });
+        groupInfo.innerHTML =
+          `<strong>📦 Groupe de ${reschedulingGroupMembers.length} interventions détecté</strong> ` +
+          `<span style="color: var(--text-muted);">(même client · même jour · même TA)</span><br>` +
+          `<span style="font-size: 12px; color: var(--text-muted);">${items.join(' • ')}</span>`;
+        groupCheckbox.checked = true;
+        groupSection.classList.remove('hidden');
+      } else {
+        reschedulingGroupMembers = [dataIdx];
+        groupSection.classList.add('hidden');
+        groupCheckbox.checked = false;
+      }
 
       // Pré-remplir : même date par défaut (le DM choisit la nouvelle), même TA, même heure
       if (currentDate) {
@@ -3503,9 +3648,13 @@
         const newDate = new Date(y, m - 1, d);
         newDate.setHours(0, 0, 0, 0);
 
-        // Vérifier que ce n'est pas un jour férié
+        // Vérifier que ce n'est pas un jour férié OU un jour fermé semaine (v51)
         if (isJourFerie(newDate)) {
           throw new Error('Impossible de reprogrammer sur un jour férié.');
+        }
+        if (isJourFermeSemaine(newDate)) {
+          const dayIdx = (newDate.getDay() + 6) % 7;
+          throw new Error(`Impossible de reprogrammer sur un ${DAYS[dayIdx].toLowerCase()} : jour fermé en permanence.`);
         }
 
         // Convertir heure en slot (30 min chacun)
@@ -3534,34 +3683,89 @@
           throw new Error('La reprogrammation ne s\'applique pas aux Fil rouge / Sans RDV.');
         }
 
-        showFB('💾 Mise à jour...', 'info');
+        // v51 : décider si on reprogramme en groupe
+        const groupCheckbox = document.getElementById('resched-group-all');
+        const applyToGroup = groupCheckbox && groupCheckbox.checked && reschedulingGroupMembers.length > 1;
+
+        // Liste des membres à reprogrammer. Si pas de groupe, c'est juste l'intervention cliquée.
+        const members = applyToGroup ? reschedulingGroupMembers : [reschedulingDataIdx];
+
+        // Calculer le décalage de slot entre l'ancienne et la nouvelle heure de l'intervention cliquée.
+        // Ce même décalage sera appliqué à chaque membre du groupe.
+        const clickedOldSlot = (Number(r[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
+        const slotDelta = newSlot - clickedOldSlot;
+
+        // Pré-calculer + valider chaque update avant d'écrire quoi que ce soit
+        const updates = [];
+        for (const idx of members) {
+          const member = allInterventions[idx];
+          if (!member) continue;
+          const oldSlot = (Number(member[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
+          const newSlotForMember = oldSlot + slotDelta;
+          const newRowForMember = ROW_OFFSET + newSlotForMember;
+          const newHour = WORK_HOURS_START + newSlotForMember * 0.5;
+          // Vérifier horaires
+          if (newHour < WORK_HOURS_START || newHour >= WORK_HOURS_END) {
+            const label = (member[COL.FORFAIT] || '—');
+            throw new Error(`Après décalage, le forfait "${label}" sortirait des horaires (${newHour.toFixed(1)}h). Choisissez une heure plus adaptée.`);
+          }
+          // Vérifier pause
+          if (newHour >= PAUSE_START && newHour < PAUSE_END) {
+            const label = (member[COL.FORFAIT] || '—');
+            throw new Error(`Après décalage, le forfait "${label}" tomberait pendant la pause (${newHour.toFixed(1)}h). Choisissez une heure plus adaptée.`);
+          }
+          const updatedRow = [...member];
+          updatedRow[COL.DATE] = dateToSerial(newDate);
+          updatedRow[COL.ROW] = newRowForMember;
+          updatedRow[COL.COL] = newCol;
+          updatedRow[COL.TECHNICIEN] = newTA;
+          const rowInSheet = idx + 2;  // +2 : ligne 1 = headers, index 0 → ligne 2
+          updates.push({ idx, row: updatedRow, rowInSheet });
+        }
+
+        showFB(applyToGroup ? `💾 Mise à jour (${updates.length} interventions)...` : '💾 Mise à jour...', 'info');
 
         // Garantir un token valide avant l'écriture
         await ensureValidToken();
 
-        // Cloner la ligne + n'ajuster que 4 colonnes : DATE (B), ROW (C), COL (D), TECHNICIEN (AG)
-        const updatedRow = [...r];
-        updatedRow[COL.DATE] = dateToSerial(newDate);
-        updatedRow[COL.ROW] = newRow;
-        updatedRow[COL.COL] = newCol;
-        updatedRow[COL.TECHNICIEN] = newTA;
-
-        const rowInSheet = reschedulingDataIdx + 2;  // +2 : ligne 1 = headers, index 0 → ligne 2
-        const url = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/DONNEES_OK!A${rowInSheet}:AJ${rowInSheet}?valueInputOption=RAW`;
-        const res = await fetch(url, {
-          method: 'PUT',
-          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ values: [updatedRow] })
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`Erreur écriture Sheets : ${t}`);
+        if (updates.length === 1) {
+          // Chemin simple : une seule intervention
+          const u = updates[0];
+          const url = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/DONNEES_OK!A${u.rowInSheet}:AJ${u.rowInSheet}?valueInputOption=RAW`;
+          const res = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [u.row] })
+          });
+          if (!res.ok) {
+            const t = await res.text();
+            throw new Error(`Erreur écriture Sheets : ${t}`);
+          }
+          allInterventions[u.idx] = u.row;
+        } else {
+          // v51 : batchUpdate pour écrire toutes les lignes du groupe en une requête
+          const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values:batchUpdate`;
+          const data = updates.map(u => ({
+            range: `DONNEES_OK!A${u.rowInSheet}:AJ${u.rowInSheet}`,
+            values: [u.row]
+          }));
+          const res = await fetch(batchUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ valueInputOption: 'RAW', data })
+          });
+          if (!res.ok) {
+            const t = await res.text();
+            throw new Error(`Erreur écriture Sheets (batch) : ${t}`);
+          }
+          // MàJ locale uniquement si tout s'est bien passé
+          updates.forEach(u => { allInterventions[u.idx] = u.row; });
         }
 
-        // MàJ locale
-        allInterventions[reschedulingDataIdx] = updatedRow;
-
-        showFB('✅ Intervention reprogrammée !', 'success');
+        const okMsg = applyToGroup
+          ? `✅ ${updates.length} interventions reprogrammées !`
+          : '✅ Intervention reprogrammée !';
+        showFB(okMsg, 'success');
         setTimeout(() => {
           closeRescheduleModal();
           document.getElementById('modal').classList.add('hidden');  // aussi la modale détails
@@ -3615,7 +3819,29 @@
         ['FPPEC2', r[COL.FPPEC2] || '—'],
         ['Commentaire', r[COL.COMMENTAIRE] || '—']
       ];
-      const html = rows.map(([k, v]) =>
+      // v51 : bandeau "📦 Groupe de N interventions" en haut de la modale si applicable
+      let groupHeaderHtml = '';
+      const groupMembers = findGroupMembers(dataIdx);
+      if (groupMembers.length > 1) {
+        const items = groupMembers.map(idx => {
+          const m = allInterventions[idx];
+          const mSlot = (Number(m[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
+          const mH = WORK_HOURS_START + mSlot * 0.5;
+          const mHH = Math.floor(mH); const mMM = (mH - mHH) * 60;
+          const mTime = `${String(mHH).padStart(2,'0')}:${String(mMM).padStart(2,'0')}`;
+          const mForfait = m[COL.FORFAIT] || '—';
+          const current = idx === dataIdx ? ' style="font-weight:700;color:#92400e;"' : '';
+          return `<span${current}>${mTime} · ${escapeHtml(mForfait)}</span>`;
+        });
+        groupHeaderHtml =
+          `<div style="background:#fffbeb;border-left:4px solid #d97706;padding:10px 12px;border-radius:6px;margin-bottom:14px;font-size:13px;">
+             <strong style="color:#92400e;">📦 Groupe de ${groupMembers.length} interventions</strong>
+             <span style="color: var(--text-muted); font-size: 12px;"> (même client · même jour · même TA)</span><br>
+             <span style="font-size: 12px; color: var(--text-muted);">${items.join(' • ')}</span>
+           </div>`;
+      }
+
+      const html = groupHeaderHtml + rows.map(([k, v]) =>
         `<div class="modal-row"><span class="label">${k}</span><span class="value">${escapeHtml(String(v))}</span></div>`
       ).join('');
       document.getElementById('modal-title').textContent = r[COL.CLIENT] || 'Intervention';
@@ -3680,10 +3906,12 @@
         const opt = document.createElement('option');
         opt.value = i;
         const dateLabel = `${DAYS[i]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
-        if (isJourFerie(d)) {
-          opt.textContent = `${dateLabel} 🚫 FÉRIÉ`;
+        // v51 : férié OU fermé semaine → option désactivée
+        const info = getDayBlockInfo(d);
+        if (info.blocked) {
+          opt.textContent = `${dateLabel} ${info.emoji} ${info.label}`;
           opt.disabled = true;
-          opt.style.color = '#991b1b';
+          opt.style.color = info.type === 'ferie' ? '#991b1b' : '#475569';
         } else {
           opt.textContent = dateLabel;
         }
@@ -3727,7 +3955,13 @@
         document.getElementById('f-technicien').value = context.ta;
         heureSelect.value = context.slot;
       } else {
-        dateSelect.value = 0;
+        // v51 : sélectionner le premier jour non bloqué (férié ou fermé semaine)
+        let firstAvailable = 0;
+        for (let i = 0; i < 6; i++) {
+          const d = new Date(selectedMonday); d.setDate(selectedMonday.getDate() + i);
+          if (!isDayBlocked(d)) { firstAvailable = i; break; }
+        }
+        dateSelect.value = firstAvailable;
         document.getElementById('f-technicien').value = 'TA1';
         heureSelect.value = 2; // 09:00 par défaut
       }
@@ -4022,6 +4256,10 @@
         // Bloquer la planification les jours fériés
         if (isJourFerie(date)) {
           throw new Error('🚫 Impossible de planifier une intervention un jour férié.\n\nMerci de choisir une autre date.');
+        }
+        // v51 : bloquer aussi les jours fermés sur longue période
+        if (isJourFermeSemaine(date)) {
+          throw new Error(`🚷 Impossible de planifier une intervention un ${DAYS[dayIdx].toLowerCase()} : jour fermé en permanence.\n\nMerci de choisir une autre date.`);
         }
 
         // Calculer la ligne du Sheet
@@ -4903,6 +5141,74 @@
         }
       } catch (err) {
         console.error('Erreur sauvegarde pause :', err);
+        showFB('❌ ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '💾 Enregistrer';
+      }
+    }
+
+    // =====================================================
+    // v51 : JOURS FERMÉS (longue période — ex: fermé le lundi en permanence)
+    // =====================================================
+    // Stockage dans l'onglet CONFIG, clé "jours_fermes", valeur = "0,3" (indices Lundi=0 à Samedi=5)
+
+    function openJoursFermesModal() {
+      const container = document.getElementById('jours-fermes-list');
+      const current = Array.isArray(siteConfig.joursFermes) ? siteConfig.joursFermes : [];
+      let html = '';
+      for (let i = 0; i < 6; i++) {
+        const checked = current.includes(i) ? 'checked' : '';
+        html += `<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:${checked ? '#fef2f2' : '#fff'};">
+          <input type="checkbox" class="jf-day" value="${i}" ${checked} style="width:18px;height:18px;cursor:pointer;">
+          <span style="font-weight:600;color:var(--text);">${DAYS[i]}</span>
+        </label>`;
+      }
+      container.innerHTML = html;
+      // Mettre à jour le style quand on coche/décoche
+      container.querySelectorAll('.jf-day').forEach(cb => {
+        cb.addEventListener('change', () => {
+          cb.parentElement.style.background = cb.checked ? '#fef2f2' : '#fff';
+        });
+      });
+      document.getElementById('jours-fermes-feedback').className = 'form-feedback';
+      document.getElementById('jours-fermes-feedback').textContent = '';
+      document.getElementById('jours-fermes-modal').classList.remove('hidden');
+    }
+
+    function closeJoursFermesModal() {
+      document.getElementById('jours-fermes-modal').classList.add('hidden');
+    }
+
+    async function submitJoursFermesForm() {
+      const btn = document.getElementById('btn-save-jours-fermes');
+      btn.disabled = true;
+      btn.textContent = '⏳ Enregistrement...';
+      const showFB = (msg, type) => {
+        const el = document.getElementById('jours-fermes-feedback');
+        el.textContent = msg;
+        el.className = `form-feedback ${type}`;
+      };
+      try {
+        const checked = Array.from(document.querySelectorAll('#jours-fermes-list .jf-day:checked'))
+          .map(cb => parseInt(cb.value, 10))
+          .filter(n => !isNaN(n))
+          .sort((a, b) => a - b);
+        const value = checked.join(',');  // "" si rien, "0,3" sinon
+        showFB('💾 Sauvegarde...', 'info');
+        const ok = await saveConfigKey('jours_fermes', value);
+        if (ok) {
+          siteConfig.joursFermes = checked;
+          showFB('✅ Jours fermés enregistrés !', 'success');
+          setTimeout(() => {
+            closeJoursFermesModal();
+            renderPlanning();
+          }, 600);
+        } else {
+          showFB('⚠️ Sauvegarde partielle (onglet CONFIG manquant ?)', 'error');
+        }
+      } catch (err) {
+        console.error('Erreur sauvegarde jours fermés :', err);
         showFB('❌ ' + err.message, 'error');
       } finally {
         btn.disabled = false;
