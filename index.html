@@ -552,6 +552,7 @@
             <option value="MALADIE">🤒 Maladie</option>
             <option value="FORMATION">🎓 Formation</option>
             <option value="RTT">🌴 RTT</option>
+            <option value="REPOS">💤 Repos</option>
           </select>
         </div>
       </div>
@@ -1407,7 +1408,9 @@
       'CONGES':     { label: 'Congés',    emoji: '🏖️', bg: '#fef3c7', text: '#92400e', border: '#f59e0b' },
       'MALADIE':    { label: 'Maladie',   emoji: '🤒', bg: '#fee2e2', text: '#991b1b', border: '#dc2626' },
       'FORMATION':  { label: 'Formation', emoji: '🎓', bg: '#dbeafe', text: '#1e40af', border: '#3b82f6' },
-      'RTT':        { label: 'RTT',       emoji: '🌴', bg: '#d1fae5', text: '#065f46', border: '#10b981' }
+      'RTT':        { label: 'RTT',       emoji: '🌴', bg: '#d1fae5', text: '#065f46', border: '#10b981' },
+      // v52 : Repos (jour de repos planifié, hors congés / RTT)
+      'REPOS':      { label: 'Repos',     emoji: '💤', bg: '#ede9fe', text: '#5b21b6', border: '#8b5cf6' }
     };
     const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
     const DAYS_SHORT = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -3048,6 +3051,157 @@
       return result;
     }
 
+    // =====================================================
+    // v52 : AUTO-DÉCALAGE EN CASCADE
+    // Quand on place une intervention sur un créneau déjà occupé, décale la ou les
+    // interventions existantes en les poussant à la suite. Reste strictement sur le
+    // même jour + même TA ; refuse si on sort des horaires.
+    // =====================================================
+
+    // Calcule l'empreinte (slots occupés) d'une intervention qui démarre à startSlot
+    // pour une durée de slotsNeeded, en sautant la pause déjeuner. Reste dans la journée.
+    function footprintOnDay(startSlot, slotsNeeded) {
+      const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
+      const slots = [];
+      let curSlot = startSlot;
+      let placed = 0;
+      while (placed < slotsNeeded && curSlot < slotsCount) {
+        const h = WORK_HOURS_START + curSlot * 0.5;
+        if (h >= PAUSE_START && h < PAUSE_END) { curSlot++; continue; }
+        slots.push(curSlot);
+        curSlot++;
+        placed++;
+      }
+      return slots;
+    }
+
+    // Convertit un slot en libellé HH:MM
+    function slotToTimeLabel(slot) {
+      const h = WORK_HOURS_START + slot * 0.5;
+      const hh = Math.floor(h);
+      const mm = Math.round((h - hh) * 60);
+      return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+    }
+
+    // Planifie une cascade : décale les interventions déjà présentes sur le même
+    // jour / même TA pour laisser la place à la nouvelle à startSlot.
+    // excludeIdx : index d'une intervention à ignorer (en mode édition).
+    // Retourne { feasible, steps:[{idx,oldSlot,newSlot,slotsNeeded,client,forfait}], reason }
+    function planCascade(dayIdx, ta, newStartSlot, newSlotsNeeded, excludeIdx) {
+      const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
+      const date = new Date(selectedMonday);
+      date.setDate(selectedMonday.getDate() + dayIdx);
+      const dateSerial = dateToSerial(date);
+
+      // Récupérer les interventions existantes sur ce jour + ce TA (hors FR / urgence / exclude)
+      const existing = [];
+      allInterventions.forEach((row, idx) => {
+        if (!row) return;
+        if (idx === excludeIdx) return;
+        if (isFilRouge(row) || isUrgence(row)) return;
+        if (row[COL.DATE] !== dateSerial) return;
+        if ((row[COL.TECHNICIEN] || 'TA1') !== ta) return;
+        const startSlot = (Number(row[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
+        const temps = Number(row[COL.TEMPS_TOTAL]) || Number(row[COL.TEMPS_REEL]) || SLOT_DURATION;
+        const slotsNeeded = Math.max(1, Math.ceil(temps / SLOT_DURATION));
+        existing.push({ idx, startSlot, slotsNeeded, row });
+      });
+      // Trier par startSlot croissant pour un parcours chronologique cohérent
+      existing.sort((a, b) => a.startSlot - b.startSlot);
+
+      // Empreinte de la nouvelle intervention
+      const newFp = footprintOnDay(newStartSlot, newSlotsNeeded);
+      if (newFp.length < newSlotsNeeded) {
+        return { feasible: false, reason: 'La nouvelle intervention dépasse les horaires de la journée.' };
+      }
+      const occupied = new Set(newFp);
+
+      const steps = [];
+      for (const item of existing) {
+        const itemFp = footprintOnDay(item.startSlot, item.slotsNeeded);
+        const collides = itemFp.some(s => occupied.has(s));
+        if (!collides) {
+          itemFp.forEach(s => occupied.add(s));
+          continue;
+        }
+        // Décaler : chercher le premier slot libre dont l'empreinte entière ne touche aucun slot occupé
+        const maxOcc = Math.max(...occupied);
+        let candidate = maxOcc + 1;
+        let foundStart = -1;
+        while (candidate < slotsCount) {
+          const h = WORK_HOURS_START + candidate * 0.5;
+          if (h >= PAUSE_START && h < PAUSE_END) { candidate++; continue; }
+          const candFp = footprintOnDay(candidate, item.slotsNeeded);
+          if (candFp.length < item.slotsNeeded) break;  // ne tient plus
+          const overlaps = candFp.some(s => occupied.has(s));
+          if (!overlaps) { foundStart = candidate; break; }
+          candidate++;
+        }
+        if (foundStart < 0) {
+          return {
+            feasible: false,
+            reason: `Impossible de décaler "${item.row[COL.CLIENT] || '—'}" : dépasserait la fin de journée (${slotToTimeLabel(slotsCount - 1)}).`
+          };
+        }
+        const newItemFp = footprintOnDay(foundStart, item.slotsNeeded);
+        steps.push({
+          idx: item.idx,
+          oldSlot: item.startSlot,
+          newSlot: foundStart,
+          slotsNeeded: item.slotsNeeded,
+          client: item.row[COL.CLIENT] || '—',
+          forfait: item.row[COL.FORFAIT] || ''
+        });
+        newItemFp.forEach(s => occupied.add(s));
+      }
+
+      return { feasible: true, steps };
+    }
+
+    // Applique les décalages en Sheets via batchUpdate + met à jour allInterventions.
+    async function applyCascade(steps) {
+      if (!steps || steps.length === 0) return;
+      const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values:batchUpdate`;
+      const data = [];
+      const localUpdates = [];
+      for (const s of steps) {
+        const updatedRow = [...allInterventions[s.idx]];
+        updatedRow[COL.ROW] = ROW_OFFSET + s.newSlot;
+        // La colonne jour+TA ne change pas (même jour, même TA)
+        const rowInSheet = s.idx + 2;
+        data.push({
+          range: `DONNEES_OK!A${rowInSheet}:AJ${rowInSheet}`,
+          values: [updatedRow]
+        });
+        localUpdates.push({ idx: s.idx, row: updatedRow });
+      }
+      const res = await fetch(batchUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valueInputOption: 'RAW', data })
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`Erreur écriture cascade : ${t}`);
+      }
+      // MàJ locale seulement si l'écriture a réussi
+      localUpdates.forEach(u => { allInterventions[u.idx] = u.row; });
+    }
+
+    // Affiche la fenêtre de confirmation de cascade et renvoie true si l'utilisateur valide.
+    function confirmCascade(steps) {
+      const header = steps.length === 1
+        ? '⚠️ Une intervention occupe déjà ce créneau.\nElle sera décalée :\n\n'
+        : `⚠️ Plusieurs interventions occupent ce créneau.\n${steps.length} décalages seront appliqués en cascade :\n\n`;
+      const lines = steps.map((s, i) => {
+        const prefix = steps.length > 1 ? `${i + 1}. ` : '• ';
+        const forfaitPart = s.forfait ? ` (${s.forfait})` : '';
+        return `${prefix}${s.client}${forfaitPart} : ${slotToTimeLabel(s.oldSlot)} → ${slotToTimeLabel(s.newSlot)}`;
+      });
+      const msg = header + lines.join('\n') + '\n\n✅ Valider le décalage ?';
+      return confirm(msg);
+    }
+
     function renderPlanningDay() {
       const dayIdx = currentViewDay;
       const date = new Date(selectedMonday);
@@ -4340,6 +4494,23 @@
           mopafaMontant,                                      // AI : MOPAFA (PFA supplémentaire montant libre)
           document.getElementById('f-vendeur').value || ''    // AJ : Vendeur (V1/V2/V3/V4)
         ];
+
+        // v52 : auto-décalage en cascade si le créneau est déjà occupé
+        // Calculer le nombre de slots visuels nécessaires (bloc = forfait + MOPA)
+        const newSlotsNeeded = Math.max(1, Math.ceil(tempsTotal / SLOT_DURATION));
+        const cascade = planCascade(dayIdx, technicien, slotStart, newSlotsNeeded, isEditing ? editingDataIdx : null);
+        if (!cascade.feasible) {
+          throw new Error('🚫 ' + cascade.reason);
+        }
+        if (cascade.steps.length > 0) {
+          // Montrer l'alerte de validation listant tous les décalages
+          const ok = confirmCascade(cascade.steps);
+          if (!ok) {
+            throw new Error('Annulé par l\'utilisateur.');
+          }
+          showFormFeedback(`💾 Décalage des ${cascade.steps.length} intervention(s) existante(s)...`, 'info');
+          await applyCascade(cascade.steps);
+        }
 
         showFormFeedback('💾 Écriture dans le Sheets...', 'info');
 
