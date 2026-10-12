@@ -39,6 +39,11 @@
     #screen-login p { color: var(--text-muted); margin-bottom: 24px; font-size: 15px; }
     #btn-login { width: 100%; padding: 14px; font-size: 15px; }
     .week-nav { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); }
+    /* v49e : variante compacte avec juste un sélecteur de date */
+    .week-nav-compact { padding: 12px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .week-date-label { font-size: 14px; font-weight: 600; color: var(--text); }
+    .week-date-input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; background: white; cursor: pointer; }
+    .week-date-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
     .week-nav-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
     .week-nav-title { font-size: 15px; font-weight: 600; color: var(--text); }
     .week-nav-arrows { display: flex; gap: 8px; }
@@ -437,19 +442,11 @@
         <div id="search-results-list" class="search-results-list"></div>
       </div>
 
-      <div class="week-nav">
-        <div class="week-nav-header">
-          <div class="week-nav-title" id="month-title">—</div>
-          <div class="week-nav-arrows">
-            <button class="secondary compact" id="btn-prev-month">◀</button>
-            <button class="secondary compact" id="btn-today">Aujourd'hui</button>
-            <button class="secondary compact" id="btn-next-month">▶</button>
-          </div>
-        </div>
-        <div class="month-grid" id="month-grid"></div>
-        <div style="font-size: 12px; color: var(--text-muted); text-align:center;">
-          Cliquez sur un lundi pour afficher la semaine correspondante
-        </div>
+      <!-- v49e : calendrier mensuel remplacé par un sélecteur de date compact.
+           La navigation entre semaines se fait principalement avec les boutons ‹ › à côté de MAJ. -->
+      <div class="week-nav week-nav-compact">
+        <label for="week-date-picker" class="week-date-label">📅 Aller à la semaine du</label>
+        <input type="date" id="week-date-picker" class="week-date-input">
       </div>
 
       <div class="planning-wrapper">
@@ -976,7 +973,7 @@
           <button class="secondary" id="btn-call-intervention">📞 Appeler</button>
           <button class="secondary" id="btn-mail-intervention">📧 Envoyer rappel</button>
           <button class="secondary" id="btn-history-intervention">📜 Historique</button>
-          <button class="secondary" id="btn-pdf-intervention" style="background: #fef3c7; color: #92400e; border-color: #fcd34d;">📄 OR PDF</button>
+          <!-- v49d : bouton OR PDF retiré, l'application dédiée reprend cette fonction -->
         </div>
         <button class="secondary" id="btn-close-modal">Fermer</button>
       </div>
@@ -1325,7 +1322,10 @@
       'atelier34500@gmail.com': ['beziers'],
       'narb.143.dm@gmail.com': ['valence'],
       'narb.148.dm@gmail.com': ['lons'],
+      'ateliernarbonne.lons@gmail.com': ['lons'],       // Lons — 2e compte (atelier)
+      'remy.lanusse@gmail.com': ['lons'],                // Lons — 3e compte (Rémy)
       'narb.111.dm@gmail.com': ['bordeaux-sud'],
+      'dm.caisse111@gmail.com': ['bordeaux-sud'],        // Bordeaux Mérignac (Sud) — 2e compte (caisse)
       'narb.e56.dm@gmail.com': ['perigueux'],
       'narb.14a.dm@gmail.com': ['auch'],
       'narb.121.dm@gmail.com': ['dax'],
@@ -1505,9 +1505,23 @@
 
       document.getElementById('btn-login').addEventListener('click', () => login(false));
       document.getElementById('btn-logout').addEventListener('click', logout);
-      document.getElementById('btn-prev-month').addEventListener('click', () => changeMonth(-1));
-      document.getElementById('btn-next-month').addEventListener('click', () => changeMonth(1));
-      document.getElementById('btn-today').addEventListener('click', goToToday);
+      // v49e : calendrier mensuel remplacé par un sélecteur de date
+      // Quand le DM choisit une date → on se positionne sur le lundi de la semaine correspondante
+      const datePicker = document.getElementById('week-date-picker');
+      if (datePicker) {
+        datePicker.addEventListener('change', (e) => {
+          const val = e.target.value;  // format YYYY-MM-DD
+          if (!val) return;
+          const [y, m, d] = val.split('-').map(Number);
+          const chosen = new Date(y, m - 1, d);
+          chosen.setHours(0, 0, 0, 0);
+          // Trouver le lundi de la semaine (lundi = 1)
+          const dow = (chosen.getDay() + 6) % 7;  // 0=lundi, 6=dimanche
+          const monday = new Date(chosen);
+          monday.setDate(chosen.getDate() - dow);
+          selectWeek(monday);
+        });
+      }
       document.getElementById('btn-refresh').addEventListener('click', () => loadAndRender(true));
       document.getElementById('btn-maj').addEventListener('click', async () => {
         const btn = document.getElementById('btn-maj');
@@ -1698,10 +1712,7 @@
         const idx = parseInt(document.getElementById('modal').dataset.idx);
         if (!isNaN(idx)) openClientHistory(idx);
       });
-      document.getElementById('btn-pdf-intervention').addEventListener('click', () => {
-        const idx = parseInt(document.getElementById('modal').dataset.idx);
-        if (!isNaN(idx)) generateORPDF(idx);
-      });
+      // v49d : bouton OR PDF retiré, listener désactivé
       document.getElementById('btn-close-pdf').addEventListener('click', () => {
         document.getElementById('pdf-modal').classList.add('hidden');
       });
@@ -2145,43 +2156,23 @@
     }
 
     // =====================================================
-    // CALENDRIER MENSUEL
+    // SÉLECTEUR DE SEMAINE (v49e : remplace l'ancien calendrier mensuel)
     // =====================================================
+    // La fonction renderMonthCalendar() est conservée en no-op pour compatibilité
+    // avec les anciens appels (selectWeek, goToToday, etc.) qui l'invoquaient.
+    // Elle synchronise désormais l'input date avec la semaine sélectionnée.
     function renderMonthCalendar() {
-      const monthNames = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-      document.getElementById('month-title').textContent = `${monthNames[displayedMonth.getMonth()]} ${displayedMonth.getFullYear()}`;
-      const grid = document.getElementById('month-grid');
-      grid.innerHTML = '';
-      DAYS_SHORT.forEach(d => {
-        const h = document.createElement('div');
-        h.className = 'month-grid-header'; h.textContent = d;
-        grid.appendChild(h);
-      });
-      const firstOfMonth = new Date(displayedMonth.getFullYear(), displayedMonth.getMonth(), 1);
-      const dayOfWeek = (firstOfMonth.getDay() + 6) % 7;
-      const firstDay = new Date(firstOfMonth);
-      firstDay.setDate(firstOfMonth.getDate() - dayOfWeek);
-      const today = new Date(); today.setHours(0,0,0,0);
-      for (let i = 0; i < 42; i++) {
-        const d = new Date(firstDay); d.setDate(firstDay.getDate() + i);
-        const cell = document.createElement('div');
-        cell.className = 'day-cell'; cell.textContent = d.getDate();
-        if (d.getMonth() !== displayedMonth.getMonth()) cell.classList.add('other-month');
-        if (d.getTime() === today.getTime()) cell.classList.add('today');
-        if (d.getDay() === 1 && d.getMonth() === displayedMonth.getMonth()) {
-          cell.classList.add('is-monday-selectable');
-          cell.addEventListener('click', () => selectWeek(new Date(d)));
-        }
-        if (selectedMonday) {
-          const weekEnd = new Date(selectedMonday);
-          weekEnd.setDate(selectedMonday.getDate() + 6);
-          if (d >= selectedMonday && d <= weekEnd && d.getMonth() === displayedMonth.getMonth()) cell.classList.add('in-week-selected');
-        }
-        grid.appendChild(cell);
+      const picker = document.getElementById('week-date-picker');
+      if (picker && selectedMonday) {
+        const y = selectedMonday.getFullYear();
+        const m = String(selectedMonday.getMonth() + 1).padStart(2, '0');
+        const d = String(selectedMonday.getDate()).padStart(2, '0');
+        picker.value = `${y}-${m}-${d}`;
       }
     }
 
-    function changeMonth(delta) { displayedMonth.setMonth(displayedMonth.getMonth() + delta); renderMonthCalendar(); }
+    // changeMonth() reste pour compat (plus de boutons mois) — no-op
+    function changeMonth(delta) { /* v49e : calendrier mensuel retiré */ }
     function goToToday() {
       const today = new Date();
       const dayOfWeek = (today.getDay() + 6) % 7;
