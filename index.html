@@ -4792,6 +4792,12 @@
     //   2. Match insensible aux espaces internes    → "fp 127" retrouve "FP127"
     //   3. Match sans casse et sans espaces (dernier recours)
     // Renvoie { forfait, canonicalCode } si trouvé, ou null sinon.
+    // v55b : normalisation forte — enlève tout caractère non alphanumérique.
+    // Attrape les espaces insécables, zéros larges, BOM, tirets, points… qui échappent à \s.
+    function normalizeForfaitCode(s) {
+      return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    }
+
     function findForfait(rawValue) {
       const trimmed = (rawValue || '').trim();
       if (!trimmed) return null;
@@ -4801,10 +4807,18 @@
       let f = assortiment.find(x => (x.code || '').toUpperCase() === upper);
       if (f) return { forfait: f, canonicalCode: f.code };
 
-      // 2. Match sans espaces internes des deux côtés (fallback)
+      // 2. Match sans espaces internes des deux côtés (fallback classique)
       const stripped = upper.replace(/\s+/g, '');
       f = assortiment.find(x => (x.code || '').toUpperCase().replace(/\s+/g, '') === stripped);
       if (f) return { forfait: f, canonicalCode: f.code };
+
+      // 3. v55b : match normalisé agressif — gère les caractères invisibles
+      //    (ex: "FP 41" avec espace insécable, "FP-41", "FP.41" collés par copie)
+      const normalized = normalizeForfaitCode(trimmed);
+      if (normalized) {
+        f = assortiment.find(x => normalizeForfaitCode(x.code) === normalized);
+        if (f) return { forfait: f, canonicalCode: f.code };
+      }
 
       return null;
     }
@@ -5113,19 +5127,29 @@
           const titleEl = document.getElementById('form-title');
           if (titleEl) titleEl.textContent = '➕ Ajouter intervention';
 
-          // Calculer la nouvelle heure de début = heure courante + temps total (forfait + MOPA)
+          // v55b : calcul de la nouvelle heure de début basé sur l'EMPREINTE VISUELLE
+          // réelle de l'intervention qui vient d'être posée (prend en compte le saut de pause).
+          // Avant : newSlot = slotStart + slotsNeeded → faux quand l'intervention traverse la pause,
+          //         ce qui déclenchait une cascade erronée au 2e forfait.
           const dureeBlocVisuel = tempsReel + tcHeures;
-          const newSlot = slotStart + Math.ceil(dureeBlocVisuel / SLOT_DURATION);
-          // S'assurer que le slot existe dans le menu (saute la pause)
+          const slotsNeededPrev = Math.max(1, Math.ceil(dureeBlocVisuel / SLOT_DURATION));
+          const fpPrev = footprintOnDay(slotStart, slotsNeededPrev);
+          const lastSlotUsed = (fpPrev.length > 0) ? fpPrev[fpPrev.length - 1] : (slotStart + slotsNeededPrev - 1);
+          const newSlot = lastSlotUsed + 1;
+          // S'assurer que le slot existe dans le menu (saute la pause déjeuner si on tombe pile dessus)
           const heureSelect = document.getElementById('f-heure');
           const heureOptions = Array.from(heureSelect.options).map(o => parseInt(o.value));
+          const maxOption = heureOptions[heureOptions.length - 1];
           let nextSlot = newSlot;
-          // Si le slot suivant n'existe pas (passe sur la pause), prendre le suivant disponible
-          while (!heureOptions.includes(nextSlot) && nextSlot < heureOptions[heureOptions.length - 1]) {
+          // Si le slot calculé n'existe pas (= tombe sur la pause), avancer jusqu'au prochain disponible
+          while (!heureOptions.includes(nextSlot) && nextSlot <= maxOption) {
             nextSlot++;
           }
           if (heureOptions.includes(nextSlot)) {
             heureSelect.value = nextSlot;
+          } else {
+            // Débordement en fin de journée : on reste sur la dernière valeur valide
+            heureSelect.value = maxOption;
           }
 
           // Vider uniquement Forfait + Durée + Quantité pour saisir le 2e forfait
