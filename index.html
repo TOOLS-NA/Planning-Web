@@ -3190,11 +3190,13 @@
       // Trier par startSlot croissant pour un parcours chronologique cohérent
       existing.sort((a, b) => a.startSlot - b.startSlot);
 
-      // Empreinte de la nouvelle intervention
+      // Empreinte de la nouvelle intervention sur ce jour.
+      // v54c : si l'empreinte déborde en fin de journée (ex: forfait 3h démarré à 17:00),
+      // on NE REFUSE PLUS — le rendu gère déjà le débordement au jour ouvré suivant (J+1).
+      // On utilise les slots qui tiennent dans la journée pour la détection de conflit cascade.
+      // Les conflits éventuels sur le jour suivant ne sont pas détectés (usage rare, acceptable).
       const newFp = footprintOnDay(newStartSlot, newSlotsNeeded);
-      if (newFp.length < newSlotsNeeded) {
-        return { feasible: false, reason: 'La nouvelle intervention dépasse les horaires de la journée.' };
-      }
+      const overflowsToNextDay = (newFp.length < newSlotsNeeded);
       // v53 : refuser si l'empreinte de la nouvelle intervention touche une tranche grisée
       const grisSlots = getHoraireGrisSlots(ta, dayIdx);
       const grisOnNewFp = newFp.filter(s => grisSlots.includes(s));
