@@ -81,6 +81,18 @@
     /* v53 : tranche horaire grisée manuellement — fond uni gris, non cliquable */
     table.planning td.slot.horaire-gris { background: #cbd5e1; cursor: not-allowed; }
     table.planning td.slot.horaire-gris:hover { background: #cbd5e1; }
+    /* v55 : ligne absence vendeurs */
+    table.planning tr.vendor-abs-row td { background: #f8fafc; padding: 4px 6px; font-size: 11px; text-align: center; vertical-align: middle; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    table.planning tr.vendor-abs-row td.has-abs { background: #fff7ed; }
+    .vendor-abs-chip { display: inline-flex; align-items: center; gap: 4px; margin: 1px 2px; padding: 1px 6px; background: #fff; border: 1px solid #fdba74; border-radius: 10px; font-size: 10px; }
+    .vendor-abs-chip .pastille-small { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+    .vendor-abs-chip .abs-badge { background: #94a3b8; color: #fff; font-weight: 700; padding: 0 4px; border-radius: 3px; font-size: 9px; }
+    /* v55 : colonne annotation (entre TA1 et TA2) */
+    table.planning th.annotation-header { background: #fef3c7; color: #92400e; font-size: 11px; }
+    table.planning td.annotation-cell { background: #fffbeb; cursor: pointer; padding: 2px 4px; font-size: 10px; line-height: 1.2; min-width: 70px; max-width: 90px; vertical-align: top; }
+    table.planning td.annotation-cell:hover { background: #fef3c7; }
+    table.planning td.annotation-cell.has-note { padding: 3px 5px; font-weight: 600; color: #fff; border-left: 3px solid rgba(0,0,0,0.15); }
+    table.planning td.annotation-cell.has-note.continuation { color: transparent; }
     /* v53 : grille de la modale Horaires */
     table.horaires-grid th, table.horaires-grid td { border: 1px solid #e2e8f0; padding: 4px 6px; text-align: center; }
     table.horaires-grid thead th { background: #f8fafc; font-weight: 700; position: sticky; top: 0; z-index: 2; }
@@ -552,13 +564,28 @@
   <div id="absence-modal" class="modal-overlay hidden">
     <div class="modal-box" style="max-width: 520px;">
       <h3 id="absence-modal-title">🏖️ Déclarer une absence</h3>
-      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">
         Le ou les jours marqués apparaîtront en zone grisée sur le planning (les interventions restent possibles).
       </p>
 
+      <!-- v55 : toggle Catégorie TA / Vendeur -->
+      <div class="form-row" style="margin-bottom: 10px;">
+        <label>Catégorie</label>
+        <div style="display: flex; gap: 8px;">
+          <label class="abs-cat-opt active" data-cat="TA" style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid var(--border); border-radius:6px; cursor:pointer; background:#eff6ff;">
+            <input type="radio" name="abs-cat" value="TA" checked style="margin:0;">
+            <span style="font-weight:600;">🧑 Technicien</span>
+          </label>
+          <label class="abs-cat-opt" data-cat="VENDEUR" style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid var(--border); border-radius:6px; cursor:pointer; background:#fff;">
+            <input type="radio" name="abs-cat" value="VENDEUR" style="margin:0;">
+            <span style="font-weight:600;">🛒 Vendeur</span>
+          </label>
+        </div>
+      </div>
+
       <div class="form-row cols-2">
         <div class="form-row">
-          <label class="required" for="abs-ta">Technicien</label>
+          <label class="required" for="abs-ta" id="abs-ta-label">Technicien</label>
           <select id="abs-ta">
             <option value="TA1">TA1</option>
             <option value="TA2">TA2</option>
@@ -824,6 +851,47 @@
       <div class="form-actions">
         <button class="secondary" id="btn-cancel-horaires">Annuler</button>
         <button id="btn-save-horaires" style="background: #475569;">💾 Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALE ANNOTATION (v55 : note libre entre TA1 et TA2) -->
+  <div id="annotation-modal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width: 480px;">
+      <h3 id="ann-title">📝 Nouvelle annotation</h3>
+      <p id="ann-date-info" style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px;">📅 —</p>
+
+      <div class="form-row cols-2">
+        <div class="form-row">
+          <label class="required" for="ann-heure">Heure début</label>
+          <select id="ann-heure"></select>
+        </div>
+        <div class="form-row">
+          <label class="required" for="ann-duree">Durée</label>
+          <select id="ann-duree"></select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label class="required" for="ann-text">Texte</label>
+        <textarea id="ann-text" rows="3" placeholder="Ex: RDV téléphone client Dupont, visite inspecteur, livraison fournisseur..." style="resize: vertical; min-height: 60px; max-height: 180px;"></textarea>
+      </div>
+
+      <div class="form-row">
+        <label for="ann-color">Couleur</label>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <input type="color" id="ann-color" value="#D97706" style="width: 60px; height: 40px; padding: 2px; cursor: pointer; border: 1px solid var(--border); border-radius: 6px;">
+          <span style="font-size: 12px; color: var(--text-muted); font-style: italic;">Choisissez une couleur libre</span>
+        </div>
+      </div>
+
+      <div id="ann-feedback" class="form-feedback"></div>
+      <div class="form-actions" style="justify-content: space-between;">
+        <button class="danger" id="btn-ann-delete" style="display: none;">🗑️ Supprimer</button>
+        <div style="display: flex; gap: 8px; margin-left: auto;">
+          <button class="secondary" id="btn-ann-cancel">Annuler</button>
+          <button id="btn-ann-save" style="background: #D97706;">💾 Enregistrer</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1568,6 +1636,10 @@
     //   { 'S41_2026': { TA1: { 0: [4,5,6], 3: [10,11] }, TA2: {...} }, ... }
     //   Les nombres dans les listes sont des indices de SLOT (0 = 08:00, 1 = 08:30, …)
     let horairesGrisCache = {};
+    // v55 : cache des annotations (colonne entre TA1 et TA2, hors stats/CA/temps)
+    //   { <dateSerial>: [ { id, slot, slots, text, color }, ... ], ... }
+    let annotationsCache = {};
+    let editingAnnotationId = null;
     let currentEditContext = null;  // Données du clic pour pré-remplir le formulaire
     let editingDataIdx = null;  // Index de l'intervention en cours d'édition (null si nouveau)
     let donneesSheetGid = null;  // GID de l'onglet DONNEES_OK (pour suppression de ligne)
@@ -1743,6 +1815,13 @@
       document.getElementById('btn-save-presence').addEventListener('click', submitPresenceTaForm);
       document.getElementById('presence-modal').addEventListener('click', (e) => {
         if (e.target.id === 'presence-modal') closePresenceTaModal();
+      });
+      // v55 : Annotations (colonne libre entre TA1 et TA2)
+      document.getElementById('btn-ann-cancel').addEventListener('click', closeAnnotationModal);
+      document.getElementById('btn-ann-save').addEventListener('click', submitAnnotationForm);
+      document.getElementById('btn-ann-delete').addEventListener('click', deleteCurrentAnnotation);
+      document.getElementById('annotation-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'annotation-modal') closeAnnotationModal();
       });
       // v53 : Horaires grisés manuellement
       document.getElementById('btn-manage-horaires').addEventListener('click', openHorairesModal);
@@ -2213,6 +2292,7 @@
       absencesCache = [];
       presenceTaCache = {};
       horairesGrisCache = {};  // v53
+      annotationsCache = {};   // v55
       siteConfig = defaultSiteConfig();
       const defaults = (SITES[siteKey].defaultHeuresTA) || [35, 35, 35];
       heuresTaCurrent = [...defaults];
@@ -2256,6 +2336,7 @@
       fetchSiteConfig().catch(e => console.warn('Config:', e));
       fetchPresenceTa().catch(e => console.warn('PresenceTA:', e));
       fetchHorairesGris().catch(e => console.warn('HorairesGris:', e));  // v53
+      fetchAnnotations().catch(e => console.warn('Annotations:', e));    // v55
     }
 
     function logout() {
@@ -3141,6 +3222,22 @@
 
     // Calcule l'empreinte (slots occupés) d'une intervention qui démarre à startSlot
     // pour une durée de slotsNeeded, en sautant la pause déjeuner. Reste dans la journée.
+    // v55 : structure des colonnes affichées par jour sur le planning
+    //  Renvoie un tableau [{type:'TA', ta:'TA1'}, {type:'NOTES'}, {type:'TA', ta:'TA2'}, ...]
+    //  Insère la colonne NOTES entre TA1 et TA2 si au moins 2 TA actifs ; sinon après le dernier TA.
+    function dayColumnSpec() {
+      const tas = activeTAs();
+      const cols = [];
+      tas.forEach((ta, idx) => {
+        cols.push({ type: 'TA', ta });
+        if (idx === 0 && tas.length > 1) {
+          cols.push({ type: 'NOTES' });
+        }
+      });
+      if (tas.length === 1) cols.push({ type: 'NOTES' });
+      return cols;
+    }
+
     function footprintOnDay(startSlot, slotsNeeded) {
       const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
       const slots = [];
@@ -3294,6 +3391,231 @@
       return confirm(msg);
     }
 
+    // =====================================================
+    // v55 : ANNOTATIONS (colonne libre entre TA1 et TA2 par jour)
+    // =====================================================
+    // Stockage onglet ANNOTATIONS : 5 colonnes "Date | Slot | Durée | Texte | Couleur"
+    //   Date : serial Sheets (nombre)
+    //   Slot : index 0..N-1 (0 = 08:00, 2 = 09:00, …)
+    //   Durée : nombre de slots (1 = 30min)
+    //   Texte : contenu libre
+    //   Couleur : hex (#D97706) — libre choix DM
+
+    async function fetchAnnotations() {
+      annotationsCache = {};
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/ANNOTATIONS!A:E?valueRenderOption=UNFORMATTED_VALUE`;
+      try {
+        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+        if (!res.ok) {
+          console.warn('[Annotations] Onglet ANNOTATIONS introuvable, ignoré');
+          return;
+        }
+        const data = await res.json();
+        const rows = data.values || [];
+        rows.forEach((r, idx) => {
+          if (idx === 0 && typeof r[0] === 'string' && r[0].toLowerCase().includes('date')) return;
+          const dateSerial = Number(r[0]);
+          const slot = parseInt(r[1], 10);
+          const slots = Math.max(1, parseInt(r[2], 10) || 1);
+          const text = String(r[3] || '').trim();
+          const color = String(r[4] || '#D97706').trim();
+          if (isNaN(dateSerial) || isNaN(slot)) return;
+          if (!annotationsCache[dateSerial]) annotationsCache[dateSerial] = [];
+          // id = numéro de ligne (1-based) dans le Sheets, pour update/delete
+          const id = idx + 1;
+          annotationsCache[dateSerial].push({ id, slot, slots, text, color });
+        });
+        console.log(`[Annotations] ${rows.length - 1} entrées chargées`);
+      } catch (err) {
+        console.warn('[Annotations] Erreur chargement:', err.message);
+      }
+    }
+
+    // Renvoie les annotations d'un jour (array d'objets)
+    function getAnnotationsForDate(date) {
+      if (!date) return [];
+      const serial = dateToSerial(date);
+      return annotationsCache[serial] || [];
+    }
+
+    // Trouve une annotation par id (parcourt tous les jours)
+    function findAnnotationById(id) {
+      for (const serial of Object.keys(annotationsCache)) {
+        const found = (annotationsCache[serial] || []).find(a => a.id === id);
+        if (found) return { ...found, dateSerial: Number(serial) };
+      }
+      return null;
+    }
+
+    // Ouvre la modale annotation en mode création ou édition
+    function openAnnotationModal(context) {
+      // context = { date, slot } pour création, OU { annotationId } pour édition
+      editingAnnotationId = null;
+      let dateSerial, slot, slots, text, color;
+      if (context && context.annotationId) {
+        const a = findAnnotationById(context.annotationId);
+        if (!a) return;
+        editingAnnotationId = a.id;
+        dateSerial = a.dateSerial;
+        slot = a.slot;
+        slots = a.slots;
+        text = a.text;
+        color = a.color;
+        document.getElementById('ann-title').textContent = '📝 Modifier l\'annotation';
+        document.getElementById('btn-ann-delete').style.display = '';
+      } else {
+        const date = context.date;
+        dateSerial = dateToSerial(date);
+        slot = context.slot;
+        slots = 2;  // défaut : 1h
+        text = '';
+        color = '#D97706';
+        document.getElementById('ann-title').textContent = '📝 Nouvelle annotation';
+        document.getElementById('btn-ann-delete').style.display = 'none';
+      }
+      const d = serialToDate(dateSerial);
+      const dateLabel = d ? `${DAYS[(d.getDay() + 6) % 7]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}` : '—';
+      document.getElementById('ann-date-info').textContent = `📅 ${dateLabel}`;
+
+      // Peupler le select heure début
+      const heureSelect = document.getElementById('ann-heure');
+      heureSelect.innerHTML = '';
+      const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
+      for (let s = 0; s < slotsCount; s++) {
+        const h = WORK_HOURS_START + s * 0.5;
+        if (h >= PAUSE_START && h < PAUSE_END) continue;
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = slotToTimeLabel(s);
+        heureSelect.appendChild(opt);
+      }
+      heureSelect.value = slot;
+
+      // Peupler la durée (en nb de slots demi-heure)
+      const dureeSelect = document.getElementById('ann-duree');
+      dureeSelect.innerHTML = '';
+      for (let n = 1; n <= 20; n++) {
+        const opt = document.createElement('option');
+        opt.value = n;
+        const h = n * 0.5;
+        opt.textContent = h < 1 ? `${n * 30} min` : (h === Math.floor(h) ? `${h}h00` : `${Math.floor(h)}h${(n % 2) * 30 || ''}0`);
+        dureeSelect.appendChild(opt);
+      }
+      dureeSelect.value = slots;
+
+      // Stocker la date courante pour la soumission
+      document.getElementById('annotation-modal').dataset.dateSerial = String(dateSerial);
+
+      document.getElementById('ann-text').value = text;
+      document.getElementById('ann-color').value = color;
+      document.getElementById('ann-feedback').className = 'form-feedback';
+      document.getElementById('ann-feedback').textContent = '';
+      document.getElementById('annotation-modal').classList.remove('hidden');
+    }
+
+    function closeAnnotationModal() {
+      editingAnnotationId = null;
+      document.getElementById('annotation-modal').classList.add('hidden');
+    }
+
+    async function submitAnnotationForm() {
+      const btn = document.getElementById('btn-ann-save');
+      btn.disabled = true;
+      btn.textContent = '⏳ Enregistrement...';
+      const showFB = (msg, type) => {
+        const el = document.getElementById('ann-feedback');
+        el.textContent = msg;
+        el.className = `form-feedback ${type}`;
+      };
+      try {
+        const dateSerial = Number(document.getElementById('annotation-modal').dataset.dateSerial);
+        const slot = parseInt(document.getElementById('ann-heure').value, 10);
+        const slots = parseInt(document.getElementById('ann-duree').value, 10);
+        const text = document.getElementById('ann-text').value.trim();
+        const color = document.getElementById('ann-color').value || '#D97706';
+        if (!text) throw new Error('Le texte est obligatoire.');
+        if (isNaN(dateSerial) || isNaN(slot) || isNaN(slots)) throw new Error('Données invalides.');
+
+        showFB('💾 Sauvegarde...', 'info');
+        await ensureValidToken();
+
+        const row = [dateSerial, slot, slots, text, color];
+        if (editingAnnotationId) {
+          // UPDATE : écrire sur la même ligne Sheets
+          const rowInSheet = editingAnnotationId + 1;  // id = index 0-based du cache = ligne (headers+1)
+          const url = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/ANNOTATIONS!A${rowInSheet}:E${rowInSheet}?valueInputOption=RAW`;
+          const res = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [row] })
+          });
+          if (!res.ok) {
+            if (res.status === 400 || res.status === 404) {
+              alert('⚠️ L\'onglet ANNOTATIONS est manquant.\n\nCréez un onglet ANNOTATIONS avec en-têtes : Date | Slot | Durée | Texte | Couleur');
+              throw new Error('Onglet ANNOTATIONS manquant.');
+            }
+            const t = await res.text();
+            throw new Error(`Erreur écriture : ${t}`);
+          }
+        } else {
+          // APPEND nouvelle ligne
+          const url = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/ANNOTATIONS!A:E:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [row] })
+          });
+          if (!res.ok) {
+            alert('⚠️ L\'onglet ANNOTATIONS est manquant.\n\nCréez un onglet ANNOTATIONS avec en-têtes : Date | Slot | Durée | Texte | Couleur');
+            throw new Error('Onglet ANNOTATIONS manquant.');
+          }
+        }
+
+        // Refetch pour récupérer les ids propres
+        await fetchAnnotations();
+        showFB('✅ Enregistré !', 'success');
+        setTimeout(() => {
+          closeAnnotationModal();
+          renderPlanning();
+        }, 600);
+      } catch (err) {
+        console.error('Erreur annotation :', err);
+        showFB('❌ ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '💾 Enregistrer';
+      }
+    }
+
+    async function deleteCurrentAnnotation() {
+      if (!editingAnnotationId) return;
+      if (!confirm('Supprimer cette annotation ?')) return;
+      const btn = document.getElementById('btn-ann-delete');
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      try {
+        await ensureValidToken();
+        // Vider la ligne (plus simple que supprimer physiquement — garde l'index stable)
+        const rowInSheet = editingAnnotationId + 1;
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/ANNOTATIONS!A${rowInSheet}:E${rowInSheet}?valueInputOption=RAW`;
+        const res = await fetch(url, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [['', '', '', '', '']] })
+        });
+        if (!res.ok) throw new Error(`Erreur suppression : ${await res.text()}`);
+        await fetchAnnotations();
+        closeAnnotationModal();
+        renderPlanning();
+      } catch (err) {
+        console.error('Erreur suppression annotation :', err);
+        alert('❌ ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🗑️ Supprimer';
+      }
+    }
+
     function renderPlanningDay() {
       const dayIdx = currentViewDay;
       const date = new Date(selectedMonday);
@@ -3360,10 +3682,43 @@
       }
 
       // Générer le tableau (colonnes TA larges, selon config du site)
-      let html = '<table class="planning"><thead>';
+      const colSpec = dayColumnSpec();  // v55 : inclut la colonne NOTES
+
+      // v55 : pré-calcul occupation annotations pour CE jour
+      const annotOccDay = {};  // annotOccDay[slot] = { annotation, isStart }
+      const annsForDay = getAnnotationsForDate(date);
+      annsForDay.forEach(a => {
+        const fp = footprintOnDay(a.slot, a.slots);
+        fp.forEach((sl, idx) => {
+          annotOccDay[sl] = { annotation: a, isStart: idx === 0 };
+        });
+      });
+
+      // v55 : bandeau absences vendeurs pour ce jour (au-dessus du tableau)
+      const vendorAbsChips = ['V1','V2','V3','V4'].map(vKey => {
+        const abs = getAbsence(date, vKey);
+        if (!abs) return null;
+        const vInfo = siteConfig.vendeurs[vKey];
+        const color = (vInfo && vInfo.couleur) || '#94a3b8';
+        const nom = (vInfo && vInfo.nom) || vKey;
+        const typeConf = ABSENCE_TYPES[abs.type] || ABSENCE_TYPES.CONGES;
+        return `<span class="vendor-abs-chip" title="${escapeHtml(nom)} — ${typeConf.label}${abs.commentaire ? ' · ' + escapeHtml(abs.commentaire) : ''}">
+          <span class="pastille-small" style="background:${color};"></span>${escapeHtml(nom)}<span class="abs-badge">${typeConf.emoji}</span>
+        </span>`;
+      }).filter(x => x);
+      const absBanner = vendorAbsChips.length > 0
+        ? `<div style="padding:6px 10px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;margin-bottom:8px;font-size:12px;"><strong style="color:#9a3412;">🛒 Vendeurs absents :</strong> ${vendorAbsChips.join('')}</div>`
+        : '';
+
+      let html = absBanner + '<table class="planning"><thead>';
       html += '<tr><th class="day-header" style="width: 80px;">Heure</th>';
-      activeTAs().forEach(ta => {
-        html += `<th class="ta-header ${ta.toLowerCase()}" style="font-size: 14px; padding: 12px;" title="${ta}">${escapeHtml(getTaLabel(ta))}</th>`;
+      colSpec.forEach(col => {
+        if (col.type === 'NOTES') {
+          html += `<th class="annotation-header" style="font-size: 13px; padding: 12px;" title="Annotations libres">📝 Notes</th>`;
+        } else {
+          const ta = col.ta;
+          html += `<th class="ta-header ${ta.toLowerCase()}" style="font-size: 14px; padding: 12px;" title="${ta}">${escapeHtml(getTaLabel(ta))}</th>`;
+        }
       });
       html += '</tr></thead><tbody>';
 
@@ -3373,7 +3728,26 @@
         const timeLabel = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
         const isPause = (h >= PAUSE_START && h < PAUSE_END);
         html += `<tr><td class="hour-cell">${timeLabel}</td>`;
-        for (const ta of activeTAs()) {
+        for (const col of colSpec) {
+          // v55 : colonne annotation
+          if (col.type === 'NOTES') {
+            if (isPause) { html += `<td class="pause" style="font-size: 12px; padding: 6px;"></td>`; continue; }
+            const annOcc = annotOccDay[s];
+            if (annOcc) {
+              const a = annOcc.annotation;
+              const styleBg = `background:${a.color};color:#fff;`;
+              if (annOcc.isStart) {
+                const shortText = a.text.length > 80 ? a.text.substring(0, 80) + '…' : a.text;
+                html += `<td class="annotation-cell has-note" style="${styleBg}min-width:140px;" title="${escapeHtml(a.text)}" onclick="openAnnotationModal({annotationId:${a.id}})">${escapeHtml(shortText)}</td>`;
+              } else {
+                html += `<td class="annotation-cell has-note continuation" style="${styleBg}min-width:140px;" onclick="openAnnotationModal({annotationId:${a.id}})"></td>`;
+              }
+            } else {
+              html += `<td class="annotation-cell" style="min-width:140px;height: 40px;" title="Cliquer pour ajouter une annotation" onclick="openAnnotationModal({date:new Date(${date.getFullYear()},${date.getMonth()},${date.getDate()}),slot:${s}})"></td>`;
+            }
+            continue;
+          }
+          const ta = col.ta;
           if (isPause) { html += `<td class="pause" style="font-size: 12px; padding: 6px;">PAUSE DÉJEUNER</td>`; continue; }
           // v49b : occupation est un ARRAY
           const occEntries = occupation[s] && occupation[s][ta];
@@ -3469,23 +3843,54 @@
       // Alias conservé pour la logique de débordement et detectOverlaps
       const daysFerie = daysBlocked;
       const tas = activeTAs();  // TA actifs selon config du site
-      let html = '<table class="planning"><thead><tr><th class="day-header" rowspan="2">Heure</th>';
+      const colSpec = dayColumnSpec();  // v55 : [{type:'TA',ta:'TA1'}, {type:'NOTES'}, {type:'TA',ta:'TA2'}, ...]
+      const nbColsPerDay = colSpec.length;
+      // v55 : rowspan de "Heure" passe à 3 (date → absences vendeurs → TA)
+      let html = '<table class="planning"><thead><tr><th class="day-header" rowspan="3">Heure</th>';
       weekDates.forEach((d, i) => {
         const ferieClass = daysFerie[i] ? ' ferie-header' : '';
-        html += `<th class="day-header${ferieClass}" colspan="${tas.length}">${DAYS[i]}<br><span style="font-weight:400;font-size:11px;">${fmt(d)}</span></th>`;
+        html += `<th class="day-header${ferieClass}" colspan="${nbColsPerDay}">${DAYS[i]}<br><span style="font-weight:400;font-size:11px;">${fmt(d)}</span></th>`;
       });
+      // v55 : nouvelle ligne absences vendeurs
+      html += '</tr><tr class="vendor-abs-row">';
+      weekDates.forEach((d, i) => {
+        if (daysFerie[i]) {
+          html += `<td colspan="${nbColsPerDay}"></td>`;
+          return;
+        }
+        // Chercher les vendeurs absents ce jour
+        const chips = ['V1', 'V2', 'V3', 'V4'].map(vKey => {
+          const abs = getAbsence(d, vKey);
+          if (!abs) return null;
+          const vInfo = siteConfig.vendeurs[vKey];
+          const color = (vInfo && vInfo.couleur) || '#94a3b8';
+          const nom = (vInfo && vInfo.nom) || vKey;
+          const typeConf = ABSENCE_TYPES[abs.type] || ABSENCE_TYPES.CONGES;
+          return `<span class="vendor-abs-chip" title="${escapeHtml(nom)} — ${typeConf.label}${abs.commentaire ? ' · ' + escapeHtml(abs.commentaire) : ''}">
+            <span class="pastille-small" style="background:${color};"></span>${escapeHtml(nom)}<span class="abs-badge">${typeConf.emoji}</span>
+          </span>`;
+        }).filter(x => x);
+        const cellClass = chips.length > 0 ? 'has-abs' : '';
+        html += `<td colspan="${nbColsPerDay}" class="${cellClass}">${chips.length ? chips.join('') : '<span style="color:#cbd5e1;font-size:10px;">— aucune —</span>'}</td>`;
+      });
+      // Ligne TA sub-headers (v55 : inclut colonne NOTES)
       html += '</tr><tr>';
       for (let i = 0; i < 6; i++) {
-        tas.forEach(ta => {
-          // TA1 toujours présent par défaut (pas de bandeau). TA2/TA3 : bandeau selon présence.
-          let presBadge = '';
-          if (ta !== 'TA1') {
-            const present = isTaPresent(ta, i);
-            presBadge = present
-              ? '<span class="ta-presence present" title="TA présent ce jour">PR</span>'
-              : '<span class="ta-presence absent" title="TA absent ce jour (saisie possible)">ABS</span>';
+        colSpec.forEach(col => {
+          if (col.type === 'NOTES') {
+            html += `<th class="annotation-header" title="Annotations libres">📝 Notes</th>`;
+          } else {
+            const ta = col.ta;
+            // TA1 toujours présent par défaut (pas de bandeau). TA2/TA3 : bandeau selon présence.
+            let presBadge = '';
+            if (ta !== 'TA1') {
+              const present = isTaPresent(ta, i);
+              presBadge = present
+                ? '<span class="ta-presence present" title="TA présent ce jour">PR</span>'
+                : '<span class="ta-presence absent" title="TA absent ce jour (saisie possible)">ABS</span>';
+            }
+            html += `<th class="ta-header ${ta.toLowerCase()}" title="${ta}">${escapeHtml(getTaLabel(ta))}${presBadge}</th>`;
           }
-          html += `<th class="ta-header ${ta.toLowerCase()}" title="${ta}">${escapeHtml(getTaLabel(ta))}${presBadge}</th>`;
         });
       }
       html += '</tr></thead><tbody>';
@@ -3543,6 +3948,20 @@
           });
         }
       }
+      // v55 : pré-calculer l'occupation des annotations par jour/slot
+      const annotOccWeek = {};  // annotOccWeek[dayIdx][slot] = { annotation, isStart }
+      for (let dayIdx = 0; dayIdx < 6; dayIdx++) {
+        if (daysFerie[dayIdx]) continue;
+        const date = weekDates[dayIdx];
+        const anns = getAnnotationsForDate(date);
+        anns.forEach(a => {
+          const fp = footprintOnDay(a.slot, a.slots);
+          fp.forEach((sl, idx) => {
+            if (!annotOccWeek[dayIdx]) annotOccWeek[dayIdx] = {};
+            annotOccWeek[dayIdx][sl] = { annotation: a, isStart: idx === 0 };
+          });
+        });
+      }
       for (let s = 0; s < slotsCount; s++) {
         const h = WORK_HOURS_START + s * 0.5;
         const hh = Math.floor(h); const mm = (h - hh) * 60;
@@ -3552,7 +3971,33 @@
         const dayAbsence = (dayIdx, ta) => getAbsence(weekDates[dayIdx], ta);
         html += `<tr><td class="hour-cell">${timeLabel}</td>`;
         for (let dayIdx = 0; dayIdx < 6; dayIdx++) {
-          for (const ta of activeTAs()) {
+          for (const col of colSpec) {
+            // v55 : colonne NOTES (annotation libre)
+            if (col.type === 'NOTES') {
+              if (daysFerie[dayIdx]) {
+                const bi = daysBlockInfo[dayIdx];
+                const bClass = bi.type === 'ferme' ? 'ferie ferme-week' : 'ferie';
+                html += `<td class="${bClass}"></td>`;
+                continue;
+              }
+              if (isPause) { html += `<td class="pause"></td>`; continue; }
+              const annOcc = annotOccWeek[dayIdx] && annotOccWeek[dayIdx][s];
+              if (annOcc) {
+                const a = annOcc.annotation;
+                const styleBg = `background:${a.color};color:#fff;`;
+                if (annOcc.isStart) {
+                  const shortText = a.text.length > 40 ? a.text.substring(0, 40) + '…' : a.text;
+                  html += `<td class="annotation-cell has-note" style="${styleBg}" title="${escapeHtml(a.text)}" onclick="openAnnotationModal({annotationId:${a.id}})">${escapeHtml(shortText)}</td>`;
+                } else {
+                  html += `<td class="annotation-cell has-note continuation" style="${styleBg}" onclick="openAnnotationModal({annotationId:${a.id}})"></td>`;
+                }
+              } else {
+                const dateJS = weekDates[dayIdx];
+                html += `<td class="annotation-cell" title="Cliquer pour ajouter une annotation" onclick="openAnnotationModal({date:new Date(${dateJS.getFullYear()},${dateJS.getMonth()},${dateJS.getDate()}),slot:${s}})"></td>`;
+              }
+              continue;
+            }
+            const ta = col.ta;
             // Jour férié OU fermé semaine (v51) : cellule grisée non cliquable
             if (daysFerie[dayIdx]) {
               const bi = daysBlockInfo[dayIdx];
@@ -5069,14 +5514,26 @@
         const dayLabel = date
           ? `${DAYS[(date.getDay() + 6) % 7]}<br>${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}`
           : '—';
-        const taClass = abs.ta.toLowerCase();
         const conf = ABSENCE_TYPES[abs.type] || ABSENCE_TYPES.CONGES;
         const typeBadge = `<span class="absence-type-badge" style="background:${conf.bg};color:${conf.text};">${conf.emoji} ${conf.label}</span>`;
+
+        // v55 : distinguer visuellement TA vs Vendeur
+        const isVendeur = /^V[1-4]$/i.test(abs.ta);
+        let targetBadge;
+        if (isVendeur) {
+          const vInfo = siteConfig.vendeurs[abs.ta.toUpperCase()];
+          const vColor = (vInfo && vInfo.couleur) || '#94a3b8';
+          const vNom = (vInfo && vInfo.nom) || abs.ta;
+          targetBadge = `<span class="absence-ta-badge" style="background:${vColor};color:#fff;">🛒 ${escapeHtml(vNom)}</span>`;
+        } else {
+          const taClass = abs.ta.toLowerCase();
+          targetBadge = `<span class="absence-ta-badge ${taClass}">${escapeHtml(getTaLabel(abs.ta))}</span>`;
+        }
 
         html += `
           <div class="absence-item">
             <div class="absence-day">${dayLabel}</div>
-            <span class="absence-ta-badge ${taClass}">${abs.ta}</span>
+            ${targetBadge}
             ${typeBadge}
             <div class="absence-content">${abs.commentaire ? escapeHtml(abs.commentaire) : ''}</div>
             <div class="absence-actions">
@@ -5094,8 +5551,16 @@
         return;
       }
 
-      // Reset
-      document.getElementById('abs-ta').value = 'TA1';
+      // v55 : reset du toggle Catégorie à "TA"
+      document.querySelectorAll('input[name="abs-cat"]').forEach(r => {
+        r.checked = (r.value === 'TA');
+      });
+      document.querySelectorAll('.abs-cat-opt').forEach(opt => {
+        opt.style.background = opt.dataset.cat === 'TA' ? '#eff6ff' : '#fff';
+      });
+      // Remplir le select initial pour TA
+      refillAbsTargetSelect('TA');
+
       document.getElementById('abs-type').value = 'CONGES';
       document.getElementById('abs-commentaire').value = '';
       document.getElementById('absence-feedback').className = 'form-feedback';
@@ -5122,7 +5587,45 @@
         });
       });
 
+      // v55 : brancher les listeners sur les radios Catégorie
+      document.querySelectorAll('input[name="abs-cat"]').forEach(r => {
+        r.addEventListener('change', (e) => {
+          const cat = e.target.value;
+          document.querySelectorAll('.abs-cat-opt').forEach(opt => {
+            opt.style.background = opt.dataset.cat === cat ? (cat === 'TA' ? '#eff6ff' : '#f5f3ff') : '#fff';
+          });
+          document.getElementById('abs-ta-label').textContent = cat === 'TA' ? 'Technicien' : 'Vendeur';
+          refillAbsTargetSelect(cat);
+        });
+      });
+
       document.getElementById('absence-modal').classList.remove('hidden');
+    }
+
+    // v55 : remplit le dropdown abs-ta selon la catégorie choisie (TA ou VENDEUR)
+    function refillAbsTargetSelect(cat) {
+      const sel = document.getElementById('abs-ta');
+      sel.innerHTML = '';
+      if (cat === 'TA') {
+        // TA actifs selon config du site
+        activeTAs().forEach(ta => {
+          const opt = document.createElement('option');
+          opt.value = ta;
+          const label = getTaLabel(ta);
+          opt.textContent = (label === ta) ? ta : `${label} (${ta})`;
+          sel.appendChild(opt);
+        });
+      } else {
+        // Vendeurs V1-V4 avec nom affiché
+        ['V1','V2','V3','V4'].forEach(vKey => {
+          const v = siteConfig.vendeurs[vKey];
+          if (!v) return;
+          const opt = document.createElement('option');
+          opt.value = vKey;
+          opt.textContent = `${v.nom} (${vKey})`;
+          sel.appendChild(opt);
+        });
+      }
     }
 
     function closeAbsenceForm() {
