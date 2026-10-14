@@ -87,12 +87,13 @@
     .vendor-abs-chip { display: inline-flex; align-items: center; gap: 4px; margin: 1px 2px; padding: 1px 6px; background: #fff; border: 1px solid #fdba74; border-radius: 10px; font-size: 10px; }
     .vendor-abs-chip .pastille-small { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
     .vendor-abs-chip .abs-badge { background: #94a3b8; color: #fff; font-weight: 700; padding: 0 4px; border-radius: 3px; font-size: 9px; }
-    /* v55 : colonne annotation (entre TA1 et TA2) */
-    table.planning th.annotation-header { background: #fef3c7; color: #92400e; font-size: 11px; }
-    table.planning td.annotation-cell { background: #fffbeb; cursor: pointer; padding: 2px 4px; font-size: 10px; line-height: 1.2; min-width: 70px; max-width: 90px; vertical-align: top; }
+    /* v55 : colonne annotation (entre TA1 et TA2) — v55d : séparateurs latéraux renforcés */
+    table.planning th.annotation-header { background: #fef3c7; color: #92400e; font-size: 11px; border-left: 3px solid #475569; border-right: 3px solid #475569; }
+    table.planning td.annotation-cell { background: #fffbeb; cursor: pointer; padding: 2px 4px; font-size: 10px; line-height: 1.2; min-width: 70px; max-width: 90px; vertical-align: top; border-left: 3px solid #475569; border-right: 3px solid #475569; }
     table.planning td.annotation-cell:hover { background: #fef3c7; }
-    table.planning td.annotation-cell.has-note { padding: 3px 5px; font-weight: 600; color: #fff; border-left: 3px solid rgba(0,0,0,0.15); }
+    table.planning td.annotation-cell.has-note { padding: 3px 5px; font-weight: 600; color: #fff; }
     table.planning td.annotation-cell.has-note.continuation { color: transparent; }
+    /* v55d : vendor absence row — garder les séparateurs sur la cellule colspan au-dessus de Notes n'a pas de sens, ok tel quel */
     /* v53 : grille de la modale Horaires */
     table.horaires-grid th, table.horaires-grid td { border: 1px solid #e2e8f0; padding: 4px 6px; text-align: center; }
     table.horaires-grid thead th { background: #f8fafc; font-weight: 700; position: sticky; top: 0; z-index: 2; }
@@ -3542,7 +3543,8 @@
         const row = [dateSerial, slot, slots, text, color];
         if (editingAnnotationId) {
           // UPDATE : écrire sur la même ligne Sheets
-          const rowInSheet = editingAnnotationId + 1;  // id = index 0-based du cache = ligne (headers+1)
+          // v55c : l'id est DÉJÀ le numéro de ligne 1-based (voir fetchAnnotations)
+          const rowInSheet = editingAnnotationId;
           const url = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/ANNOTATIONS!A${rowInSheet}:E${rowInSheet}?valueInputOption=RAW`;
           const res = await fetch(url, {
             method: 'PUT',
@@ -3596,7 +3598,8 @@
       try {
         await ensureValidToken();
         // Vider la ligne (plus simple que supprimer physiquement — garde l'index stable)
-        const rowInSheet = editingAnnotationId + 1;
+        // v55c : l'id est DÉJÀ le numéro de ligne 1-based (voir fetchAnnotations)
+        const rowInSheet = editingAnnotationId;
         const url = `https://sheets.googleapis.com/v4/spreadsheets/${getCurrentSheetId()}/values/ANNOTATIONS!A${rowInSheet}:E${rowInSheet}?valueInputOption=RAW`;
         const res = await fetch(url, {
           method: 'PUT',
