@@ -87,6 +87,47 @@
     .vendor-abs-chip { display: inline-flex; align-items: center; gap: 4px; margin: 1px 2px; padding: 1px 6px; background: #fff; border: 1px solid #fdba74; border-radius: 10px; font-size: 10px; }
     .vendor-abs-chip .pastille-small { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
     .vendor-abs-chip .abs-badge { background: #94a3b8; color: #fff; font-weight: 700; padding: 0 4px; border-radius: 3px; font-size: 9px; }
+    /* ========== v56 : CSS d'impression ========== */
+    @media print {
+      @page { size: A4 landscape; margin: 8mm; }
+      /* Fonds et couleurs : forcer leur impression */
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+      /* Masquer tout ce qui n'est pas le planning */
+      body { background: #fff !important; }
+      header, .search-bar, #search-results, .week-nav, #absence-section, #recap-section, .filrouge-section, .urgence-section,
+      .planning-info-actions, #scope-modal, .modal-overlay { display: none !important; }
+      /* En-tête d'impression : site + semaine, construit à la volée */
+      #screen-app::before {
+        content: attr(data-print-title);
+        display: block;
+        font-size: 14pt;
+        font-weight: 700;
+        color: #1e293b;
+        margin-bottom: 4mm;
+        text-align: center;
+      }
+      /* Zone planning : full width, pas de scroll */
+      .planning-wrapper { background: #fff !important; border: none !important; padding: 0 !important; box-shadow: none !important; }
+      .planning-scroll { overflow: visible !important; max-height: none !important; }
+      .planning-info { padding: 0 0 3mm 0 !important; border: none !important; }
+      #week-info { font-size: 11pt !important; font-weight: 700 !important; }
+      /* Tableau : compact, répétition en-têtes */
+      table.planning { width: 100% !important; font-size: 7pt !important; page-break-inside: auto; }
+      table.planning thead { display: table-header-group; }
+      table.planning tbody tr { page-break-inside: avoid; }
+      table.planning th, table.planning td { padding: 1px 2px !important; }
+      table.planning td.hour-cell { font-size: 7pt !important; }
+      table.planning td.occupied { font-size: 6.5pt !important; line-height: 1.1 !important; padding: 2px 3px !important; }
+      table.planning td.occupied .client { font-size: 7pt !important; }
+      table.planning td.occupied .forfait { font-size: 6pt !important; }
+      table.planning td.occupied .designation { display: none !important; }
+      table.planning td.occupied .comment { display: none !important; }
+      /* La ligne absences vendeurs reste visible */
+      table.planning tr.vendor-abs-row td { font-size: 6pt !important; padding: 2px 3px !important; }
+      /* Pas de hover pendant l'impression */
+      table.planning td:hover { background: inherit !important; }
+    }
+
     /* v55 : colonne annotation (entre TA1 et TA2) — v55d : séparateurs latéraux renforcés */
     table.planning th.annotation-header { background: #fef3c7; color: #92400e; font-size: 11px; border-left: 3px solid #475569; border-right: 3px solid #475569; }
     table.planning td.annotation-cell { background: #fffbeb; cursor: pointer; padding: 2px 4px; font-size: 10px; line-height: 1.2; min-width: 70px; max-width: 90px; vertical-align: top; border-left: 3px solid #475569; border-right: 3px solid #475569; }
@@ -504,6 +545,7 @@
             <button class="compact" id="btn-presence-ta" style="background: #16a34a;">📍 Présence TA</button>
             <button class="compact" id="btn-manage-horaires" style="background: #475569;" title="Griser manuellement des tranches horaires sur la semaine affichée">🕒 Horaires</button>
             <button class="secondary compact" id="btn-stats">📊 Stats</button>
+            <button class="secondary compact" id="btn-print" title="Imprimer la semaine affichée (ou l'enregistrer en PDF)">🖨️ Imprimer</button>
             <button class="secondary compact" id="btn-refresh">🔄 Rafraîchir</button>
             <button class="secondary compact" id="btn-maj" title="Vérifier les mises à jour de l'application">🔄 MAJ</button>
             <button class="compact" id="btn-prev-week" title="Semaine précédente" style="background: #475569;">‹</button>
@@ -1736,6 +1778,8 @@
       document.getElementById('btn-prev-week').addEventListener('click', () => changeWeek(-1));
       document.getElementById('btn-next-week').addEventListener('click', () => changeWeek(1));
       document.getElementById('btn-stats').addEventListener('click', openStatsModal);
+      // v56 : impression de la semaine affichée (navigateur gère la boîte Imprimer → "Enregistrer en PDF" possible)
+      document.getElementById('btn-print').addEventListener('click', printPlanning);
       document.getElementById('btn-close-stats').addEventListener('click', () => {
         document.getElementById('stats-modal').classList.add('hidden');
       });
@@ -5364,6 +5408,27 @@
       }
       const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       return { months, currentKey };
+    }
+
+    // v56 : impression / export PDF de la semaine affichée
+    //  Utilise window.print() avec un CSS @media print dédié qui masque tout sauf
+    //  le titre site + info semaine + le tableau du planning.
+    //  Le navigateur propose automatiquement "Enregistrer en PDF" ou l'impression.
+    function printPlanning() {
+      if (!selectedMonday) {
+        alert('Sélectionnez d\'abord une semaine à imprimer.');
+        return;
+      }
+      // Préparer le titre d'impression (nom du site + semaine affichée)
+      const siteName = (currentSite && SITES[currentSite] && SITES[currentSite].name) || '—';
+      const fmt = (d) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+      const monday = selectedMonday;
+      const saturday = new Date(monday); saturday.setDate(monday.getDate() + 5);
+      const title = `Planning Atelier — ${siteName} · Semaine du ${fmt(monday)} au ${fmt(saturday)}`;
+      const app = document.getElementById('screen-app');
+      app.setAttribute('data-print-title', title);
+      // Déclencher l'impression — tout le reste est géré par le CSS @media print
+      window.print();
     }
 
     function openStatsModal() {
