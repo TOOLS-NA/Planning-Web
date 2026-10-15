@@ -113,8 +113,9 @@
       .planning-info { display: none !important; }  /* v56b : masquer "Semaine du..." redondant avec le titre */
       /* v56c : zoom au lieu de transform:scale — reflow réel de la mise en page pour tenir sur une page */
       #planning-content { zoom: var(--print-scale, 1); }
-      /* Tableau : compact */
-      table.planning { width: 100% !important; font-size: 6.5pt !important; border-collapse: collapse !important; }
+      /* v56d : NE PAS forcer width:100% sur le tableau — ça interagit mal avec zoom et squeeze le Samedi.
+         Laisser le tableau prendre sa largeur naturelle, le zoom s'occupe de l'ajuster à la page. */
+      table.planning { font-size: 6.5pt !important; border-collapse: collapse !important; }
       table.planning thead { display: table-header-group; }
       table.planning tbody tr, table.planning thead tr { page-break-inside: avoid; break-inside: avoid; }
       table.planning th, table.planning td { padding: 0 2px !important; line-height: 1.1 !important; }
@@ -5434,24 +5435,39 @@
       const app = document.getElementById('screen-app');
       app.setAttribute('data-print-title', title);
 
-      // v56c : calcul dynamique du zoom pour forcer tout sur UNE page A4 paysage.
-      //  - A4 paysage à 96 DPI : 1123 × 794 px
-      //  - Marges @page 6mm × 2 = 12mm (≈45px), titre impression ~24px, headers planning ~60px → zone utile estimée
-      //  - Largeur dispo ≈ 1078px, Hauteur dispo ≈ 700px (marge sécurité incluse)
-      //  - Facteur sécurité × 0.93 pour couvrir les arrondis d'impression du navigateur
+      // v56d : mesure de la LARGEUR NATURELLE du tableau pour calculer le zoom.
+      //  - A4 paysage à 96 DPI : 1123 × 794 px, marges 6mm × 2 ≈ 45px → zone utile ≈ 1078 × 749px
+      //  - Titre impression ~24px → hauteur utile ≈ 720px
+      //  - Facteur sécurité × 0.90 pour garantir que les 6 colonnes jours (y compris Samedi) rentrent
+      //  - IMPORTANT : on force temporairement le tableau à sa largeur naturelle (max-content) pour
+      //    éviter que le "width: 100%" de l'écran squeeze les colonnes et sous-estime la vraie taille.
       const content = document.getElementById('planning-content');
       if (content) {
         const table = content.querySelector('table.planning');
         if (table) {
-          const naturalW = table.scrollWidth;
-          const naturalH = table.scrollHeight;
+          // 1. Sauvegarder les styles qu'on va changer temporairement
+          const savedWidth = table.style.width;
+          const savedTableLayout = table.style.tableLayout;
+          // 2. Forcer la largeur naturelle pour mesurer
+          table.style.width = 'max-content';
+          table.style.tableLayout = 'auto';
+          // 3. Forcer un reflow synchrone en lisant une propriété de layout
+          void table.offsetWidth;
+          // 4. Mesurer les dimensions naturelles (max de plusieurs sources par sécurité)
+          const naturalW = Math.max(table.scrollWidth, table.offsetWidth, table.getBoundingClientRect().width);
+          const naturalH = Math.max(table.scrollHeight, table.offsetHeight);
+          // 5. Restaurer les styles d'origine
+          table.style.width = savedWidth;
+          table.style.tableLayout = savedTableLayout;
+
           const availW = 1078;
-          const availH = 700;
+          const availH = 720;
           const scaleW = availW / naturalW;
           const scaleH = availH / naturalH;
-          const SAFETY = 0.93;
+          const SAFETY = 0.90;
           const scale = Math.min(scaleW, scaleH, 1) * SAFETY;  // Jamais zoomer au-delà de 100%
           content.style.setProperty('--print-scale', scale.toFixed(3));
+          console.log(`[Print] naturalW=${naturalW}px naturalH=${naturalH}px → scale=${scale.toFixed(3)}`);
         }
       }
 
