@@ -89,41 +89,47 @@
     .vendor-abs-chip .abs-badge { background: #94a3b8; color: #fff; font-weight: 700; padding: 0 4px; border-radius: 3px; font-size: 9px; }
     /* ========== v56 : CSS d'impression ========== */
     @media print {
-      @page { size: A4 landscape; margin: 8mm; }
+      @page { size: A4 landscape; margin: 6mm; }
       /* Fonds et couleurs : forcer leur impression */
       * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
       /* Masquer tout ce qui n'est pas le planning */
-      body { background: #fff !important; }
+      body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
       header, .search-bar, #search-results, .week-nav, #absence-section, #recap-section, .filrouge-section, .urgence-section,
       .planning-info-actions, #scope-modal, .modal-overlay { display: none !important; }
+      main { padding: 0 !important; margin: 0 !important; }
       /* En-tête d'impression : site + semaine, construit à la volée */
       #screen-app::before {
         content: attr(data-print-title);
         display: block;
-        font-size: 14pt;
+        font-size: 11pt;
         font-weight: 700;
         color: #1e293b;
-        margin-bottom: 4mm;
+        margin-bottom: 2mm;
         text-align: center;
       }
-      /* Zone planning : full width, pas de scroll */
-      .planning-wrapper { background: #fff !important; border: none !important; padding: 0 !important; box-shadow: none !important; }
-      .planning-scroll { overflow: visible !important; max-height: none !important; }
-      .planning-info { padding: 0 0 3mm 0 !important; border: none !important; }
-      #week-info { font-size: 11pt !important; font-weight: 700 !important; }
-      /* Tableau : compact, répétition en-têtes */
-      table.planning { width: 100% !important; font-size: 7pt !important; page-break-inside: auto; }
+      /* Zone planning : full width, pas de scroll, forcé sur UNE page */
+      .planning-wrapper { background: #fff !important; border: none !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; page-break-inside: avoid !important; break-inside: avoid !important; }
+      .planning-scroll { overflow: visible !important; max-height: none !important; page-break-inside: avoid !important; break-inside: avoid !important; }
+      .planning-info { display: none !important; }  /* v56b : masquer "Semaine du..." redondant avec le titre */
+      /* v56b : conteneur de mise à l'échelle (défini dynamiquement par printPlanning) */
+      #planning-content { transform-origin: top left; transform: scale(var(--print-scale, 1)); width: calc(100% / var(--print-scale, 1)); page-break-inside: avoid !important; break-inside: avoid !important; }
+      /* Tableau : compact, UNE SEULE PAGE */
+      table.planning { width: 100% !important; font-size: 6.5pt !important; border-collapse: collapse !important; page-break-inside: avoid !important; break-inside: avoid !important; }
       table.planning thead { display: table-header-group; }
-      table.planning tbody tr { page-break-inside: avoid; }
-      table.planning th, table.planning td { padding: 1px 2px !important; }
-      table.planning td.hour-cell { font-size: 7pt !important; }
-      table.planning td.occupied { font-size: 6.5pt !important; line-height: 1.1 !important; padding: 2px 3px !important; }
-      table.planning td.occupied .client { font-size: 7pt !important; }
-      table.planning td.occupied .forfait { font-size: 6pt !important; }
+      table.planning tbody tr, table.planning thead tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+      table.planning th, table.planning td { padding: 0 2px !important; line-height: 1.1 !important; }
+      table.planning td.hour-cell { font-size: 6.5pt !important; font-weight: 600; }
+      table.planning td.pause { font-size: 5.5pt !important; padding: 0 2px !important; }
+      table.planning td.occupied { font-size: 5.5pt !important; line-height: 1 !important; padding: 1px 2px !important; }
+      table.planning td.occupied .client { font-size: 6pt !important; display: block; }
+      table.planning td.occupied .forfait { font-size: 5pt !important; display: block; }
       table.planning td.occupied .designation { display: none !important; }
       table.planning td.occupied .comment { display: none !important; }
+      table.planning td.annotation-cell { font-size: 5pt !important; padding: 0 1px !important; }
       /* La ligne absences vendeurs reste visible */
-      table.planning tr.vendor-abs-row td { font-size: 6pt !important; padding: 2px 3px !important; }
+      table.planning tr.vendor-abs-row td { font-size: 5pt !important; padding: 0 2px !important; line-height: 1.1 !important; }
+      .vendor-abs-chip { font-size: 5pt !important; padding: 0 3px !important; }
+      .vendor-abs-chip .pastille-small { width: 5px !important; height: 5px !important; }
       /* Pas de hover pendant l'impression */
       table.planning td:hover { background: inherit !important; }
     }
@@ -5427,8 +5433,36 @@
       const title = `Planning Atelier — ${siteName} · Semaine du ${fmt(monday)} au ${fmt(saturday)}`;
       const app = document.getElementById('screen-app');
       app.setAttribute('data-print-title', title);
+
+      // v56b : calcul dynamique du facteur d'échelle pour forcer tout sur UNE page A4 paysage
+      //  - A4 paysage à 96 DPI : 1123 × 794 px (approximatif)
+      //  - Marges @page 6mm × 2 = 12mm, titre impression ~22px, soit ~734px dispo en hauteur
+      //  - Largeur dispo ~1077px après marges
+      const content = document.getElementById('planning-content');
+      if (content) {
+        const table = content.querySelector('table.planning');
+        if (table) {
+          // Mesurer en forçant un rendu temporaire (le DOM est à l'écran, les dimensions sont valides)
+          const naturalW = table.scrollWidth;
+          const naturalH = table.scrollHeight;
+          const availW = 1077;
+          const availH = 734;
+          const scaleW = availW / naturalW;
+          const scaleH = availH / naturalH;
+          const scale = Math.min(scaleW, scaleH, 1);  // Jamais zoomer au-delà de 100%
+          content.style.setProperty('--print-scale', scale.toFixed(3));
+        }
+      }
+
       // Déclencher l'impression — tout le reste est géré par le CSS @media print
       window.print();
+
+      // Après l'impression (ou son annulation), réinitialiser le scale pour ne pas affecter l'écran
+      // (Note : la variable CSS --print-scale n'affecte le rendu que dans @media print, donc pas urgent,
+      //  mais on nettoie quand même par propreté.)
+      setTimeout(() => {
+        if (content) content.style.removeProperty('--print-scale');
+      }, 1500);
     }
 
     function openStatsModal() {
