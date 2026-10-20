@@ -135,6 +135,10 @@
       table.planning td:hover { background: inherit !important; }
     }
 
+    /* v57 : séparateur vertical foncé entre les jours — appliqué sur la 1ère cellule de chaque jour (sauf Lundi) */
+    table.planning th.day-start,
+    table.planning td.day-start { border-left: 4px solid #0f172a !important; }
+
     /* v55 : colonne annotation (entre TA1 et TA2) — v55d : séparateurs latéraux renforcés */
     table.planning th.annotation-header { background: #fef3c7; color: #92400e; font-size: 11px; border-left: 3px solid #475569; border-right: 3px solid #475569; }
     table.planning td.annotation-cell { background: #fffbeb; cursor: pointer; padding: 2px 4px; font-size: 10px; line-height: 1.2; min-width: 70px; max-width: 90px; vertical-align: top; border-left: 3px solid #475569; border-right: 3px solid #475569; }
@@ -3903,13 +3907,17 @@
       let html = '<table class="planning"><thead><tr><th class="day-header" rowspan="3">Heure</th>';
       weekDates.forEach((d, i) => {
         const ferieClass = daysFerie[i] ? ' ferie-header' : '';
-        html += `<th class="day-header${ferieClass}" colspan="${nbColsPerDay}">${DAYS[i]}<br><span style="font-weight:400;font-size:11px;">${fmt(d)}</span></th>`;
+        // v57 : classe .day-start sur les en-têtes de date (sauf le premier) pour séparateur visuel
+        const dsCls = (i > 0) ? ' day-start' : '';
+        html += `<th class="day-header${ferieClass}${dsCls}" colspan="${nbColsPerDay}">${DAYS[i]}<br><span style="font-weight:400;font-size:11px;">${fmt(d)}</span></th>`;
       });
       // v55 : nouvelle ligne absences vendeurs
       html += '</tr><tr class="vendor-abs-row">';
       weekDates.forEach((d, i) => {
+        // v57 : séparateur visuel entre jours
+        const dsCls = (i > 0) ? ' day-start' : '';
         if (daysFerie[i]) {
-          html += `<td colspan="${nbColsPerDay}"></td>`;
+          html += `<td colspan="${nbColsPerDay}" class="${dsCls.trim()}"></td>`;
           return;
         }
         // Chercher les vendeurs absents ce jour
@@ -3924,15 +3932,17 @@
             <span class="pastille-small" style="background:${color};"></span>${escapeHtml(nom)}<span class="abs-badge">${typeConf.emoji}</span>
           </span>`;
         }).filter(x => x);
-        const cellClass = chips.length > 0 ? 'has-abs' : '';
-        html += `<td colspan="${nbColsPerDay}" class="${cellClass}">${chips.length ? chips.join('') : '<span style="color:#cbd5e1;font-size:10px;">— aucune —</span>'}</td>`;
+        const cellClass = (chips.length > 0 ? 'has-abs' : '') + dsCls;
+        html += `<td colspan="${nbColsPerDay}" class="${cellClass.trim()}">${chips.length ? chips.join('') : '<span style="color:#cbd5e1;font-size:10px;">— aucune —</span>'}</td>`;
       });
-      // Ligne TA sub-headers (v55 : inclut colonne NOTES)
+      // Ligne TA sub-headers (v55 : inclut colonne NOTES — v57 : classe .day-start pour séparateur visuel)
       html += '</tr><tr>';
       for (let i = 0; i < 6; i++) {
-        colSpec.forEach(col => {
+        colSpec.forEach((col, colIdx) => {
+          // v57 : première cellule de chaque jour (sauf tout premier) → classe day-start
+          const dayStartCls = (i > 0 && colIdx === 0) ? ' day-start' : '';
           if (col.type === 'NOTES') {
-            html += `<th class="annotation-header" title="Annotations libres">📝 Notes</th>`;
+            html += `<th class="annotation-header${dayStartCls}" title="Annotations libres">📝 Notes</th>`;
           } else {
             const ta = col.ta;
             // TA1 toujours présent par défaut (pas de bandeau). TA2/TA3 : bandeau selon présence.
@@ -3943,7 +3953,7 @@
                 ? '<span class="ta-presence present" title="TA présent ce jour">PR</span>'
                 : '<span class="ta-presence absent" title="TA absent ce jour (saisie possible)">ABS</span>';
             }
-            html += `<th class="ta-header ${ta.toLowerCase()}" title="${ta}">${escapeHtml(getTaLabel(ta))}${presBadge}</th>`;
+            html += `<th class="ta-header ${ta.toLowerCase()}${dayStartCls}" title="${ta}">${escapeHtml(getTaLabel(ta))}${presBadge}</th>`;
           }
         });
       }
@@ -4025,29 +4035,32 @@
         const dayAbsence = (dayIdx, ta) => getAbsence(weekDates[dayIdx], ta);
         html += `<tr><td class="hour-cell">${timeLabel}</td>`;
         for (let dayIdx = 0; dayIdx < 6; dayIdx++) {
-          for (const col of colSpec) {
+          for (let colIdx = 0; colIdx < colSpec.length; colIdx++) {
+            const col = colSpec[colIdx];
+            // v57 : classe .day-start sur la 1ère cellule de chaque jour (sauf tout premier) pour séparateur visuel
+            const dayStartCls = (dayIdx > 0 && colIdx === 0) ? ' day-start' : '';
             // v55 : colonne NOTES (annotation libre)
             if (col.type === 'NOTES') {
               if (daysFerie[dayIdx]) {
                 const bi = daysBlockInfo[dayIdx];
                 const bClass = bi.type === 'ferme' ? 'ferie ferme-week' : 'ferie';
-                html += `<td class="${bClass}"></td>`;
+                html += `<td class="${bClass}${dayStartCls}"></td>`;
                 continue;
               }
-              if (isPause) { html += `<td class="pause"></td>`; continue; }
+              if (isPause) { html += `<td class="pause${dayStartCls}"></td>`; continue; }
               const annOcc = annotOccWeek[dayIdx] && annotOccWeek[dayIdx][s];
               if (annOcc) {
                 const a = annOcc.annotation;
                 const styleBg = `background:${a.color};color:#fff;`;
                 if (annOcc.isStart) {
                   const shortText = a.text.length > 40 ? a.text.substring(0, 40) + '…' : a.text;
-                  html += `<td class="annotation-cell has-note" style="${styleBg}" title="${escapeHtml(a.text)}" onclick="openAnnotationModal({annotationId:${a.id}})">${escapeHtml(shortText)}</td>`;
+                  html += `<td class="annotation-cell has-note${dayStartCls}" style="${styleBg}" title="${escapeHtml(a.text)}" onclick="openAnnotationModal({annotationId:${a.id}})">${escapeHtml(shortText)}</td>`;
                 } else {
-                  html += `<td class="annotation-cell has-note continuation" style="${styleBg}" onclick="openAnnotationModal({annotationId:${a.id}})"></td>`;
+                  html += `<td class="annotation-cell has-note continuation${dayStartCls}" style="${styleBg}" onclick="openAnnotationModal({annotationId:${a.id}})"></td>`;
                 }
               } else {
                 const dateJS = weekDates[dayIdx];
-                html += `<td class="annotation-cell" title="Cliquer pour ajouter une annotation" onclick="openAnnotationModal({date:new Date(${dateJS.getFullYear()},${dateJS.getMonth()},${dateJS.getDate()}),slot:${s}})"></td>`;
+                html += `<td class="annotation-cell${dayStartCls}" title="Cliquer pour ajouter une annotation" onclick="openAnnotationModal({date:new Date(${dateJS.getFullYear()},${dateJS.getMonth()},${dateJS.getDate()}),slot:${s}})"></td>`;
               }
               continue;
             }
@@ -4057,10 +4070,10 @@
               const bi = daysBlockInfo[dayIdx];
               const bLabel = bi.type === 'ferme' ? 'FERMÉ' : 'FÉRIÉ';
               const bClass = bi.type === 'ferme' ? 'ferie ferme-week' : 'ferie';
-              html += `<td class="${bClass}">${(s === 0 && ta === tas[0]) ? bLabel : ''}</td>`;
+              html += `<td class="${bClass}${dayStartCls}">${(s === 0 && ta === tas[0]) ? bLabel : ''}</td>`;
               continue;
             }
-            if (isPause) { html += `<td class="pause">PAUSE</td>`; continue; }
+            if (isPause) { html += `<td class="pause${dayStartCls}">PAUSE</td>`; continue; }
             // v49b : occupation est maintenant un ARRAY d'entries (peut contenir plusieurs interventions en collision)
             const occEntries = occupation[s] && occupation[s][dayIdx] && occupation[s][dayIdx][ta];
             if (occEntries && occEntries.length > 0) {
@@ -4095,14 +4108,14 @@
                 const overlapTitle = conflictClients
                   ? ` title="⚠️ Cette intervention chevauche : ${escapeHtml(conflictClients.join(', '))}"`
                   : '';
-                html += `<td class="occupied ${taClass} bloc-start${overlapClass}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"${overlapTitle}>${overlapBadge}<span class="client">${pastille}${escapeHtml(client)}</span><span class="forfait">${escapeHtml(forfait)}</span>${designation ? `<span class="designation">${escapeHtml(designation)}</span>` : ''}${commentaireHtml}</td>`;
+                html += `<td class="occupied ${taClass} bloc-start${overlapClass}${dayStartCls}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"${overlapTitle}>${overlapBadge}<span class="client">${pastille}${escapeHtml(client)}</span><span class="forfait">${escapeHtml(forfait)}</span>${designation ? `<span class="designation">${escapeHtml(designation)}</span>` : ''}${commentaireHtml}</td>`;
               } else {
-                html += `<td class="occupied ${taClass} continuation${overlapClass}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"></td>`;
+                html += `<td class="occupied ${taClass} continuation${overlapClass}${dayStartCls}" data-idx="${dataIdx}" onclick="openInterventionModal(${dataIdx})"></td>`;
               }
             } else {
               // v53 : tranche grisée manuellement → non cliquable, fond uni gris
               if (isSlotHoraireGris(ta, dayIdx, s)) {
-                html += `<td class="slot horaire-gris" title="Tranche grisée manuellement"></td>`;
+                html += `<td class="slot horaire-gris${dayStartCls}" title="Tranche grisée manuellement"></td>`;
                 continue;
               }
               // Cellule vide - vérifier si absence
@@ -4113,9 +4126,9 @@
                 const overlayInner = showLabel
                   ? `<div class="planning-absence-overlay"><span class="abs-emoji">${conf.emoji}</span><span class="abs-label">${conf.label}</span></div>`
                   : '';
-                html += `<td class="slot" style="background:${conf.bg};position:relative;" onclick="openAddForm({dayIdx:${dayIdx},ta:'${ta}',slot:${s}})">${overlayInner}</td>`;
+                html += `<td class="slot${dayStartCls}" style="background:${conf.bg};position:relative;" onclick="openAddForm({dayIdx:${dayIdx},ta:'${ta}',slot:${s}})">${overlayInner}</td>`;
               } else {
-                html += `<td class="slot" onclick="openAddForm({dayIdx:${dayIdx},ta:'${ta}',slot:${s}})"></td>`;
+                html += `<td class="slot${dayStartCls}" onclick="openAddForm({dayIdx:${dayIdx},ta:'${ta}',slot:${s}})"></td>`;
               }
             }
           }
