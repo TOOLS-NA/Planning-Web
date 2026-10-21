@@ -60,7 +60,9 @@
     .planning-info { padding: 14px 20px; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 600; color: var(--text); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
     .planning-info-actions { display: flex; gap: 8px; }
     .planning-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    table.planning { border-collapse: collapse; width: 100%; min-width: 900px; font-size: 12px; }
+    table.planning { border-collapse: collapse; width: 100%; min-width: 900px; font-size: 12px; table-layout: fixed; }
+    /* v57b : les cellules intervention peuvent dépasser verticalement — on autorise le wrap des textes longs */
+    table.planning td.occupied { word-wrap: break-word; overflow-wrap: break-word; }
     table.planning th, table.planning td { border: 1px solid #e2e8f0; padding: 0; vertical-align: top; text-align: center; }
     table.planning thead .day-header { background: #f1f5f9; font-weight: 700; padding: 8px 4px; font-size: 12px; color: var(--text); border-bottom: 2px solid #cbd5e1; }
     table.planning thead .ta-header { padding: 6px 4px; font-weight: 600; font-size: 11px; }
@@ -3903,8 +3905,24 @@
       const tas = activeTAs();  // TA actifs selon config du site
       const colSpec = dayColumnSpec();  // v55 : [{type:'TA',ta:'TA1'}, {type:'NOTES'}, {type:'TA',ta:'TA2'}, ...]
       const nbColsPerDay = colSpec.length;
+      // v57b : table-layout fixed + colgroup pour forcer toutes les colonnes à la même largeur
+      //   - Heure : 60px fixe
+      //   - Chaque jour = (100% - 60px) / 6, réparti entre TA et NOTES
+      //   - NOTES = 70 % de la largeur d'une colonne TA (plus étroite car moins critique)
+      const nbTas = colSpec.filter(c => c.type === 'TA').length;
+      const unitsPerDay = nbTas * 1 + 0.7;  // TA = 1 unité, NOTES = 0.7 unité
+      const dayFraction = (100 / 6).toFixed(4);  // % du conteneur par jour (hors Heure)
+      const unitFraction = (parseFloat(dayFraction) / unitsPerDay).toFixed(4);
+      let colgroupHtml = '<colgroup><col style="width: 60px;">';
+      for (let i = 0; i < 6; i++) {
+        colSpec.forEach(col => {
+          const w = (col.type === 'NOTES') ? (0.7 * parseFloat(unitFraction)).toFixed(4) : unitFraction;
+          colgroupHtml += `<col style="width: calc((100% - 60px) * ${w} / 100);">`;
+        });
+      }
+      colgroupHtml += '</colgroup>';
       // v55 : rowspan de "Heure" passe à 3 (date → absences vendeurs → TA)
-      let html = '<table class="planning"><thead><tr><th class="day-header" rowspan="3">Heure</th>';
+      let html = '<table class="planning">' + colgroupHtml + '<thead><tr><th class="day-header" rowspan="3">Heure</th>';
       weekDates.forEach((d, i) => {
         const ferieClass = daysFerie[i] ? ' ferie-header' : '';
         // v57 : classe .day-start sur les en-têtes de date (sauf le premier) pour séparateur visuel
