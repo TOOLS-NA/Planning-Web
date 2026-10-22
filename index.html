@@ -69,7 +69,9 @@
     .ta-header.ta1 { background: var(--ta1-bg); color: var(--ta1-dark); }
     .ta-header.ta2 { background: var(--ta2-bg); color: var(--ta2-dark); }
     .ta-header.ta3 { background: var(--ta3-bg); color: var(--ta3-dark); }
-    table.planning td.hour-cell { background: #f8fafc; color: var(--text-muted); font-weight: 600; font-size: 11px; padding: 4px 6px; width: 60px; min-width: 60px; white-space: nowrap; }
+    table.planning td.hour-cell { background: #f8fafc; color: var(--text-muted); font-weight: 600; font-size: 11px; padding: 4px 6px; white-space: nowrap; }
+    /* v57c : hauteur de ligne uniforme pour toutes les cases du corps (évite les désalignements entre colonnes) */
+    table.planning tbody tr { height: 36px; }
     table.planning td.slot { background: var(--bg-empty); height: 36px; min-width: 90px; padding: 2px 4px; cursor: pointer; transition: background 0.15s; position: relative; }
     table.planning td.slot:hover { background: #ddeefe; }
     table.planning td.slot:hover::after { content: '+'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--primary); font-weight: 700; font-size: 18px; opacity: 0.7; }
@@ -3240,6 +3242,8 @@
           if (curSlot >= slotsCount) { curDay++; curSlot = 0; continue; }
           const h = WORK_HOURS_START + curSlot * 0.5;
           if (h >= PAUSE_START && h < PAUSE_END) { curSlot++; continue; }
+          // v57c : sauter les tranches manuellement grisées (comme la pause)
+          if (isSlotHoraireGris(ta, curDay, curSlot)) { curSlot++; continue; }
           cells.add(`${curDay}-${ta}-${curSlot}`);
           curSlot++; placed++;
         }
@@ -3296,7 +3300,9 @@
       return cols;
     }
 
-    function footprintOnDay(startSlot, slotsNeeded) {
+    function footprintOnDay(startSlot, slotsNeeded, skipSlots) {
+      // v57c : paramètre optionnel skipSlots (Set d'indices de slot à sauter comme la pause)
+      //        → utilisé pour que les tranches manuellement grisées soient contournées
       const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
       const slots = [];
       let curSlot = startSlot;
@@ -3304,6 +3310,7 @@
       while (placed < slotsNeeded && curSlot < slotsCount) {
         const h = WORK_HOURS_START + curSlot * 0.5;
         if (h >= PAUSE_START && h < PAUSE_END) { curSlot++; continue; }
+        if (skipSlots && skipSlots.has(curSlot)) { curSlot++; continue; }
         slots.push(curSlot);
         curSlot++;
         placed++;
@@ -3346,26 +3353,26 @@
       existing.sort((a, b) => a.startSlot - b.startSlot);
 
       // Empreinte de la nouvelle intervention sur ce jour.
-      // v54c : si l'empreinte déborde en fin de journée (ex: forfait 3h démarré à 17:00),
-      // on NE REFUSE PLUS — le rendu gère déjà le débordement au jour ouvré suivant (J+1).
-      // On utilise les slots qui tiennent dans la journée pour la détection de conflit cascade.
-      // Les conflits éventuels sur le jour suivant ne sont pas détectés (usage rare, acceptable).
-      const newFp = footprintOnDay(newStartSlot, newSlotsNeeded);
-      const overflowsToNextDay = (newFp.length < newSlotsNeeded);
-      // v53 : refuser si l'empreinte de la nouvelle intervention touche une tranche grisée
+      // v54c : si l'empreinte déborde en fin de journée, le rendu gère le J+1 → on ne refuse plus.
+      // v57c : les tranches grisées manuellement sont SAUTÉES (comme la pause déjeuner)
+      //        → l'intervention s'enjambe les grisés et poursuit après, ou déborde sur J+1.
+      //        Un démarrage pile SUR un slot grisé reste bloqué (ça n'a aucun sens).
       const grisSlots = getHoraireGrisSlots(ta, dayIdx);
-      const grisOnNewFp = newFp.filter(s => grisSlots.includes(s));
-      if (grisOnNewFp.length > 0) {
-        const times = grisOnNewFp.map(s => slotToTimeLabel(s)).join(', ');
-        return { feasible: false, reason: `Le créneau choisi contient une tranche grisée manuellement (${times}). Choisissez un autre horaire.` };
+      const grisSet = new Set(grisSlots);
+      // Refus uniquement si le DÉBUT choisi est pile un slot grisé
+      if (grisSet.has(newStartSlot)) {
+        return { feasible: false, reason: `L'heure de début choisie (${slotToTimeLabel(newStartSlot)}) est une tranche grisée manuellement. Choisissez un autre horaire.` };
       }
+      const newFp = footprintOnDay(newStartSlot, newSlotsNeeded, grisSet);
+      const overflowsToNextDay = (newFp.length < newSlotsNeeded);
       const occupied = new Set(newFp);
-      // v53 : les tranches grisées manuellement sont considérées comme occupées pour la cascade
+      // Les tranches grisées restent considérées comme occupées pour la cascade sur les autres interventions
       grisSlots.forEach(s => occupied.add(s));
 
       const steps = [];
       for (const item of existing) {
-        const itemFp = footprintOnDay(item.startSlot, item.slotsNeeded);
+        // v57c : empreinte de l'existant tient compte des tranches grisées (sautées comme la pause)
+        const itemFp = footprintOnDay(item.startSlot, item.slotsNeeded, grisSet);
         const collides = itemFp.some(s => occupied.has(s));
         if (!collides) {
           itemFp.forEach(s => occupied.add(s));
@@ -3378,7 +3385,8 @@
         while (candidate < slotsCount) {
           const h = WORK_HOURS_START + candidate * 0.5;
           if (h >= PAUSE_START && h < PAUSE_END) { candidate++; continue; }
-          const candFp = footprintOnDay(candidate, item.slotsNeeded);
+          if (grisSet.has(candidate)) { candidate++; continue; }
+          const candFp = footprintOnDay(candidate, item.slotsNeeded, grisSet);
           if (candFp.length < item.slotsNeeded) break;  // ne tient plus
           const overlaps = candFp.some(s => occupied.has(s));
           if (!overlaps) { foundStart = candidate; break; }
@@ -3390,7 +3398,7 @@
             reason: `Impossible de décaler "${item.row[COL.CLIENT] || '—'}" : dépasserait la fin de journée (${slotToTimeLabel(slotsCount - 1)}).`
           };
         }
-        const newItemFp = footprintOnDay(foundStart, item.slotsNeeded);
+        const newItemFp = footprintOnDay(foundStart, item.slotsNeeded, grisSet);
         steps.push({
           idx: item.idx,
           oldSlot: item.startSlot,
@@ -3732,6 +3740,8 @@
           while (placedSlots < slotsNeeded && curSlot < slotsCount) {
             const h = WORK_HOURS_START + curSlot * 0.5;
             if (h >= PAUSE_START && h < PAUSE_END) { curSlot++; continue; }
+            // v57c : sauter les tranches manuellement grisées (comme la pause)
+            if (isSlotHoraireGris(ta, dayIdx, curSlot)) { curSlot++; continue; }
             // v49b : liste au lieu d'objet unique → gère les chevauchements
             if (!occupation[curSlot]) occupation[curSlot] = {};
             if (!occupation[curSlot][ta]) occupation[curSlot][ta] = [];
@@ -4019,6 +4029,8 @@
               if (h >= PAUSE_START && h < PAUSE_END) { curSlot++; continue; }
               // Si le jour de départ est férié, ne rien placer (l'intervention ne devrait pas être là)
               if (daysFerie[curDay]) break;
+              // v57c : sauter les tranches manuellement grisées (comme la pause)
+              if (isSlotHoraireGris(ta, curDay, curSlot)) { curSlot++; continue; }
               // Placer l'intervention (v49b : liste au lieu d'objet unique → gère les chevauchements)
               if (!occupation[curSlot]) occupation[curSlot] = {};
               if (!occupation[curSlot][curDay]) occupation[curSlot][curDay] = {};
@@ -4503,17 +4515,11 @@
             const label = (member[COL.FORFAIT] || '—');
             throw new Error(`Après décalage, le forfait "${label}" tomberait pendant la pause (${newHour.toFixed(1)}h). Choisissez une heure plus adaptée.`);
           }
-          // v53 : vérifier qu'aucun slot de l'empreinte ne tombe sur une tranche grisée
-          if (grisSlotsOnDest.length > 0) {
-            const temps = Number(member[COL.TEMPS_TOTAL]) || Number(member[COL.TEMPS_REEL]) || SLOT_DURATION;
-            const slotsNeeded = Math.max(1, Math.ceil(temps / SLOT_DURATION));
-            const fp = footprintOnDay(newSlotForMember, slotsNeeded);
-            const hit = fp.filter(s => grisSlotsOnDest.includes(s));
-            if (hit.length > 0) {
-              const label = (member[COL.FORFAIT] || '—');
-              const times = hit.map(s => slotToTimeLabel(s)).join(', ');
-              throw new Error(`Le forfait "${label}" tomberait sur une tranche grisée (${times}). Choisissez un autre créneau.`);
-            }
+          // v57c : refuser uniquement si l'heure de DÉBUT du membre tombe pile sur une tranche grisée.
+          // Si l'empreinte CROISE des tranches grisées, le rendu les saute (comme la pause).
+          if (grisSlotsOnDest.length > 0 && grisSlotsOnDest.includes(newSlotForMember)) {
+            const label = (member[COL.FORFAIT] || '—');
+            throw new Error(`Le forfait "${label}" démarrerait sur une tranche grisée (${slotToTimeLabel(newSlotForMember)}). Choisissez un autre créneau.`);
           }
           const updatedRow = [...member];
           updatedRow[COL.DATE] = dateToSerial(newDate);
