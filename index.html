@@ -3386,15 +3386,35 @@
           candidate++;
         }
         if (foundStart < 0) {
+          // v58b : la journée courante est pleine → chercher une place sur le prochain
+          //        jour ouvré de la semaine (même TA). Évite de refuser quand la
+          //        nouvelle intervention occupe toute la journée (long forfait).
+          const nextDay = findNextDayPlacement(dayIdx, ta, item, excludeIdx);
+          if (nextDay) {
+            steps.push({
+              idx: item.idx,
+              oldSlot: item.startSlot,
+              oldDayIdx: dayIdx,
+              newSlot: nextDay.startSlot,
+              newDayIdx: nextDay.dayIdx,
+              newDateSerial: nextDay.dateSerial,
+              slotsNeeded: item.slotsNeeded,
+              client: item.row[COL.CLIENT] || '—',
+              forfait: item.row[COL.FORFAIT] || ''
+            });
+            // Pas d'ajout à `occupied` : l'intervention a quitté ce jour
+            continue;
+          }
           return {
             feasible: false,
-            reason: `Impossible de décaler "${item.row[COL.CLIENT] || '—'}" : dépasserait la fin de journée (${slotToTimeLabel(slotsCount - 1)}).`
+            reason: `Impossible de décaler "${item.row[COL.CLIENT] || '—'}" (${(item.slotsNeeded * 0.5).toFixed(1)} h) : la journée est complète et aucun jour ouvré de la semaine n'a de place suffisante.`
           };
         }
         const newItemFp = footprintOnDay(foundStart, item.slotsNeeded, grisSet);
         steps.push({
           idx: item.idx,
           oldSlot: item.startSlot,
+          oldDayIdx: dayIdx,
           newSlot: foundStart,
           slotsNeeded: item.slotsNeeded,
           client: item.row[COL.CLIENT] || '—',
@@ -3406,6 +3426,48 @@
       return { feasible: true, steps };
     }
 
+    // v58b : cherche une place pour `item` sur le prochain jour ouvré de la semaine (même TA).
+    //         Renvoie { dayIdx, dateSerial, startSlot } ou null si rien ne tient.
+    function findNextDayPlacement(startDayIdx, ta, item, excludeIdx) {
+      const slotsCount = (WORK_HOURS_END - WORK_HOURS_START) * 2;
+      for (let d = startDayIdx + 1; d < 6; d++) {
+        const futureDate = new Date(selectedMonday);
+        futureDate.setDate(selectedMonday.getDate() + d);
+        if (isDayBlocked(futureDate)) continue;
+        const futureSerial = dateToSerial(futureDate);
+        // Reconstruire l'occupation du jour cible pour ce TA
+        const grisNext = new Set(getHoraireGrisSlots(ta, d));
+        const occNext = new Set(grisNext);
+        allInterventions.forEach((row, idx) => {
+          if (!row) return;
+          if (idx === excludeIdx) return;
+          if (idx === item.idx) return;  // ne pas se compter soi-même
+          if (isFilRouge(row) || isUrgence(row)) return;
+          if (row[COL.DATE] !== futureSerial) return;
+          if ((row[COL.TECHNICIEN] || 'TA1') !== ta) return;
+          const sSlot = (Number(row[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
+          const temps = Number(row[COL.TEMPS_TOTAL]) || Number(row[COL.TEMPS_REEL]) || SLOT_DURATION;
+          const sNeeded = Math.max(1, Math.ceil(temps / SLOT_DURATION));
+          footprintOnDay(sSlot, sNeeded, grisNext).forEach(s => occNext.add(s));
+        });
+        // Chercher le premier créneau libre à partir de 09:00 (slot 2)
+        let candidate = 2;
+        while (candidate < slotsCount) {
+          const h = WORK_HOURS_START + candidate * 0.5;
+          if (h >= PAUSE_START && h < PAUSE_END) { candidate++; continue; }
+          if (grisNext.has(candidate)) { candidate++; continue; }
+          const candFp = footprintOnDay(candidate, item.slotsNeeded, grisNext);
+          if (candFp.length < item.slotsNeeded) break;  // ne tient pas sur ce jour non plus
+          const overlaps = candFp.some(s => occNext.has(s));
+          if (!overlaps) {
+            return { dayIdx: d, dateSerial: futureSerial, startSlot: candidate };
+          }
+          candidate++;
+        }
+      }
+      return null;
+    }
+
     // Applique les décalages en Sheets via batchUpdate + met à jour allInterventions.
     async function applyCascade(steps) {
       if (!steps || steps.length === 0) return;
@@ -3415,7 +3477,10 @@
       for (const s of steps) {
         const updatedRow = [...allInterventions[s.idx]];
         updatedRow[COL.ROW] = ROW_OFFSET + s.newSlot;
-        // La colonne jour+TA ne change pas (même jour, même TA)
+        // v58b : si le décalage traverse un jour (newDateSerial présent), on met à jour la DATE aussi
+        if (s.newDateSerial !== undefined && s.newDateSerial !== null) {
+          updatedRow[COL.DATE] = s.newDateSerial;
+        }
         const rowInSheet = s.idx + 2;
         data.push({
           range: `DONNEES_OK!A${rowInSheet}:AJ${rowInSheet}`,
@@ -3444,7 +3509,11 @@
       const lines = steps.map((s, i) => {
         const prefix = steps.length > 1 ? `${i + 1}. ` : '• ';
         const forfaitPart = s.forfait ? ` (${s.forfait})` : '';
-        return `${prefix}${s.client}${forfaitPart} : ${slotToTimeLabel(s.oldSlot)} → ${slotToTimeLabel(s.newSlot)}`;
+        // v58b : afficher le changement de jour quand l'intervention est basculée sur un autre jour
+        const dayChanged = (s.newDayIdx !== undefined && s.oldDayIdx !== undefined && s.newDayIdx !== s.oldDayIdx);
+        const fromLabel = (s.oldDayIdx !== undefined) ? `${DAYS[s.oldDayIdx].toLowerCase()} ${slotToTimeLabel(s.oldSlot)}` : slotToTimeLabel(s.oldSlot);
+        const toLabel = dayChanged ? `📅 ${DAYS[s.newDayIdx].toLowerCase()} ${slotToTimeLabel(s.newSlot)}` : slotToTimeLabel(s.newSlot);
+        return `${prefix}${s.client}${forfaitPart} : ${fromLabel} → ${toLabel}`;
       });
       const msg = header + lines.join('\n') + '\n\n✅ Valider le décalage ?';
       return confirm(msg);
