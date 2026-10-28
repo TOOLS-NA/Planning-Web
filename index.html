@@ -3356,11 +3356,49 @@
       if (grisSet.has(newStartSlot)) {
         return { feasible: false, reason: `L'heure de début choisie (${slotToTimeLabel(newStartSlot)}) est une tranche grisée manuellement. Choisissez un autre horaire.` };
       }
+      // v58d : collecter le débordement éventuel de la veille (D-1) sur ce jour (même TA).
+      //         Évite qu'une nouvelle intervention vienne se superposer au débordement d'un
+      //         long forfait de la veille (ex. FP86 11.8 h qui occupe 09:00 → 13:30 du lendemain).
+      const prevOverflowOcc = new Set();
+      if (dayIdx > 0) {
+        const prevDate = new Date(selectedMonday);
+        prevDate.setDate(selectedMonday.getDate() + dayIdx - 1);
+        if (!isDayBlocked(prevDate)) {
+          const prevDateSerial = dateToSerial(prevDate);
+          const grisPrev = new Set(getHoraireGrisSlots(ta, dayIdx - 1));
+          allInterventions.forEach((row, idx) => {
+            if (!row) return;
+            if (idx === excludeIdx) return;
+            if (isFilRouge(row) || isUrgence(row)) return;
+            if (row[COL.DATE] !== prevDateSerial) return;
+            if ((row[COL.TECHNICIEN] || 'TA1') !== ta) return;
+            const sSlot = (Number(row[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
+            const temps = Number(row[COL.TEMPS_TOTAL]) || Number(row[COL.TEMPS_REEL]) || SLOT_DURATION;
+            const sNeeded = Math.max(1, Math.ceil(temps / SLOT_DURATION));
+            const fpPrev = footprintOnDay(sSlot, sNeeded, grisPrev);
+            const overflowSlots = sNeeded - fpPrev.length;
+            if (overflowSlots > 0) {
+              // Le débordement démarre à 09:00 (slot 2) du jour courant, en respectant pause et grisés
+              footprintOnDay(2, overflowSlots, grisSet).forEach(s => prevOverflowOcc.add(s));
+            }
+          });
+        }
+      }
       const newFp = footprintOnDay(newStartSlot, newSlotsNeeded, grisSet);
       const overflowsToNextDay = (newFp.length < newSlotsNeeded);
+      // v58d : refus si l'intervention tombe dans la zone de débordement de la veille
+      if (newFp.some(s => prevOverflowOcc.has(s))) {
+        const maxOverflow = Math.max(...prevOverflowOcc);
+        return {
+          feasible: false,
+          reason: `Un forfait de la veille déborde ici jusqu'à ${slotToTimeLabel(maxOverflow + 1)}. Démarrez à partir de ${slotToTimeLabel(maxOverflow + 1)}.`
+        };
+      }
       const occupied = new Set(newFp);
       // Les tranches grisées restent considérées comme occupées pour la cascade sur les autres interventions
       grisSlots.forEach(s => occupied.add(s));
+      // v58d : le débordement de la veille occupe aussi ces slots du point de vue de la cascade
+      prevOverflowOcc.forEach(s => occupied.add(s));
 
       const steps = [];
       for (const item of existing) {
@@ -3450,14 +3488,42 @@
           const sNeeded = Math.max(1, Math.ceil(temps / SLOT_DURATION));
           footprintOnDay(sSlot, sNeeded, grisNext).forEach(s => occNext.add(s));
         });
+        // v58d : prendre aussi en compte le débordement du jour précédent (d-1) sur d (même TA)
+        if (d > 0) {
+          const prevD = new Date(selectedMonday);
+          prevD.setDate(selectedMonday.getDate() + d - 1);
+          if (!isDayBlocked(prevD)) {
+            const prevDSerial = dateToSerial(prevD);
+            const grisPrevD = new Set(getHoraireGrisSlots(ta, d - 1));
+            allInterventions.forEach((row, idx) => {
+              if (!row) return;
+              if (idx === excludeIdx) return;
+              if (idx === item.idx) return;
+              if (isFilRouge(row) || isUrgence(row)) return;
+              if (row[COL.DATE] !== prevDSerial) return;
+              if ((row[COL.TECHNICIEN] || 'TA1') !== ta) return;
+              const sSlot = (Number(row[COL.ROW]) || ROW_OFFSET) - ROW_OFFSET;
+              const temps = Number(row[COL.TEMPS_TOTAL]) || Number(row[COL.TEMPS_REEL]) || SLOT_DURATION;
+              const sNeeded = Math.max(1, Math.ceil(temps / SLOT_DURATION));
+              const fpPrevD = footprintOnDay(sSlot, sNeeded, grisPrevD);
+              const overflowSlots = sNeeded - fpPrevD.length;
+              if (overflowSlots > 0) {
+                footprintOnDay(2, overflowSlots, grisNext).forEach(s => occNext.add(s));
+              }
+            });
+          }
+        }
         // Chercher le premier créneau libre à partir de 09:00 (slot 2)
+        // v58c : si l'intervention est plus longue que la journée (ex. 12 h), on autorise
+        //        le débordement sur J+2 (comme pour une nouvelle intervention via overflowsToNextDay).
+        //        Pas d'early-break sur candFp.length < slotsNeeded : on prend le 1er créneau sans collision.
         let candidate = 2;
         while (candidate < slotsCount) {
           const h = WORK_HOURS_START + candidate * 0.5;
           if (h >= PAUSE_START && h < PAUSE_END) { candidate++; continue; }
           if (grisNext.has(candidate)) { candidate++; continue; }
           const candFp = footprintOnDay(candidate, item.slotsNeeded, grisNext);
-          if (candFp.length < item.slotsNeeded) break;  // ne tient pas sur ce jour non plus
+          if (candFp.length === 0) { candidate++; continue; }
           const overlaps = candFp.some(s => occNext.has(s));
           if (!overlaps) {
             return { dayIdx: d, dateSerial: futureSerial, startSlot: candidate };
