@@ -3389,9 +3389,24 @@
       // v58d : refus si l'intervention tombe dans la zone de débordement de la veille
       if (newFp.some(s => prevOverflowOcc.has(s))) {
         const maxOverflow = Math.max(...prevOverflowOcc);
+        // v58e : chercher le prochain slot RÉELLEMENT utilisable (après la pause et les grisés)
+        let nextFree = maxOverflow + 1;
+        while (nextFree < slotsCount) {
+          const h = WORK_HOURS_START + nextFree * 0.5;
+          if (h >= PAUSE_START && h < PAUSE_END) { nextFree++; continue; }
+          if (grisSet.has(nextFree)) { nextFree++; continue; }
+          break;
+        }
+        const endLabel = slotToTimeLabel(maxOverflow + 1);
+        if (nextFree >= slotsCount) {
+          return {
+            feasible: false,
+            reason: `Un forfait de la veille déborde ici jusqu'à ${endLabel} et aucun créneau utilisable ne reste ensuite ce jour-là. Choisissez un autre jour.`
+          };
+        }
         return {
           feasible: false,
-          reason: `Un forfait de la veille déborde ici jusqu'à ${slotToTimeLabel(maxOverflow + 1)}. Démarrez à partir de ${slotToTimeLabel(maxOverflow + 1)}.`
+          reason: `Un forfait de la veille déborde ici jusqu'à ${endLabel}. Démarrez à partir de ${slotToTimeLabel(nextFree)}.`
         };
       }
       const occupied = new Set(newFp);
