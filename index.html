@@ -168,6 +168,9 @@
     .horaires-day-tab.active.has-gris::after { color: #fff; }
     table.planning thead .day-header.ferie-header { background: #fee2e2; color: #991b1b; }
     table.planning thead .day-header.ferie-header::after { content: ' 🚫'; }
+    /* v58 : mise en évidence du jour en cours */
+    table.planning thead .day-header.day-today { background: #fef3c7; color: #92400e; box-shadow: inset 0 -3px 0 #d97706; }
+    table.planning thead .day-header.day-today.ferie-header { background: #fed7aa; color: #9a3412; }
     table.planning td.occupied { cursor: pointer; padding: 4px 6px; font-size: 11px; line-height: 1.3; text-align: left; }
     table.planning td.occupied.ta1 { background: var(--ta1-bg); color: var(--ta1-dark); border-left: 3px solid var(--ta1-border); }
     table.planning td.occupied.ta2 { background: var(--ta2-bg); color: var(--ta2-dark); border-left: 3px solid var(--ta2-border); }
@@ -1273,28 +1276,18 @@
             <input type="email" id="f-email" placeholder="exemple@gmail.com">
             <div class="field-hint">Permet l'envoi automatique du rappel par mail</div>
           </div>
-          <div class="form-row cols-2">
-            <div class="form-row">
-              <label for="f-vehicule">Véhicule</label>
-              <input type="text" id="f-vehicule">
-            </div>
-            <div class="form-row">
-              <label for="f-immat">Immatriculation</label>
-              <input type="text" id="f-immat">
-            </div>
-          </div>
-          <div class="form-row cols-2">
-            <div class="form-row">
-              <label for="f-km">Km</label>
-              <input type="text" id="f-km">
-            </div>
-            <div class="form-row">
-              <label for="f-fidelite">Carte fidélité</label>
-              <select id="f-fidelite">
-                <option value="NON">Non</option>
-                <option value="OUI">Oui (-10%)</option>
-              </select>
-            </div>
+          <!-- v58 : Véhicule, Immatriculation et Km retirés visuellement (RGPD : minimisation PII)
+               Les champs cachés sont conservés pour que l'édition d'une ancienne intervention
+               ne perde pas les valeurs existantes jusqu'à ce que la ligne soit mise à jour -->
+          <input type="hidden" id="f-vehicule" value="">
+          <input type="hidden" id="f-immat" value="">
+          <input type="hidden" id="f-km" value="">
+          <div class="form-row">
+            <label for="f-fidelite">Carte fidélité</label>
+            <select id="f-fidelite">
+              <option value="NON">Non</option>
+              <option value="OUI">Oui (-10%)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -3918,26 +3911,33 @@
       // v57b : table-layout fixed + colgroup pour forcer toutes les colonnes à la même largeur
       //   - Heure : 60px fixe
       //   - Chaque jour = (100% - 60px) / 6, réparti entre TA et NOTES
-      //   - NOTES = 70 % de la largeur d'une colonne TA (plus étroite car moins critique)
+      // v58 : NOTES = 45 % de la largeur d'une colonne TA (ergonomie — DM demandent TA plus larges)
       const nbTas = colSpec.filter(c => c.type === 'TA').length;
-      const unitsPerDay = nbTas * 1 + 0.7;  // TA = 1 unité, NOTES = 0.7 unité
+      const NOTES_RATIO = 0.45;  // v58 : était 0.7 en v57b
+      const unitsPerDay = nbTas * 1 + NOTES_RATIO;  // TA = 1 unité, NOTES = NOTES_RATIO unité
       const dayFraction = (100 / 6).toFixed(4);  // % du conteneur par jour (hors Heure)
       const unitFraction = (parseFloat(dayFraction) / unitsPerDay).toFixed(4);
       let colgroupHtml = '<colgroup><col style="width: 60px;">';
       for (let i = 0; i < 6; i++) {
         colSpec.forEach(col => {
-          const w = (col.type === 'NOTES') ? (0.7 * parseFloat(unitFraction)).toFixed(4) : unitFraction;
+          const w = (col.type === 'NOTES') ? (NOTES_RATIO * parseFloat(unitFraction)).toFixed(4) : unitFraction;
           colgroupHtml += `<col style="width: calc((100% - 60px) * ${w} / 100);">`;
         });
       }
       colgroupHtml += '</colgroup>';
       // v55 : rowspan de "Heure" passe à 3 (date → absences vendeurs → TA)
       let html = '<table class="planning">' + colgroupHtml + '<thead><tr><th class="day-header" rowspan="3">Heure</th>';
+      // v58 : repère du jour en cours (comparaison au niveau "jour", heures remises à 0)
+      const todayRef = new Date();
+      todayRef.setHours(0, 0, 0, 0);
+      const todayTime = todayRef.getTime();
       weekDates.forEach((d, i) => {
         const ferieClass = daysFerie[i] ? ' ferie-header' : '';
         // v57 : classe .day-start sur les en-têtes de date (sauf le premier) pour séparateur visuel
         const dsCls = (i > 0) ? ' day-start' : '';
-        html += `<th class="day-header${ferieClass}${dsCls}" colspan="${nbColsPerDay}">${DAYS[i]}<br><span style="font-weight:400;font-size:11px;">${fmt(d)}</span></th>`;
+        // v58 : classe .day-today sur l'en-tête du jour en cours
+        const todayCls = (d.getTime() === todayTime) ? ' day-today' : '';
+        html += `<th class="day-header${ferieClass}${dsCls}${todayCls}" colspan="${nbColsPerDay}">${DAYS[i]}<br><span style="font-weight:400;font-size:11px;">${fmt(d)}</span></th>`;
       });
       // v55 : nouvelle ligne absences vendeurs
       html += '</tr><tr class="vendor-abs-row">';
@@ -4619,9 +4619,7 @@
         ['CA forfait', fmtE(r[COL.CA_FORFAIT])],
         ['CA temps compl.', fmtE(r[COL.CA_TEMPS_COMPL])],
         ['MOPAFA', fmtE(r[COL.MOPAFA])],
-        ['Véhicule', r[COL.VEHICULE] || '—'],
-        ['Immat.', r[COL.IMMAT] || '—'],
-        ['Km', r[COL.KM] || '—'],
+        // v58 : Véhicule, Immat et Km retirés de l'affichage détail (RGPD : minimisation PII)
         ['Carte fidélité', r[COL.FIDELITE] || '—'],
         ['FPPEC2', r[COL.FPPEC2] || '—'],
         ['Commentaire', r[COL.COMMENTAIRE] || '—']
@@ -5220,14 +5218,11 @@
 
           // v55b : calcul de la nouvelle heure de début basé sur l'EMPREINTE VISUELLE
           // réelle de l'intervention qui vient d'être posée (prend en compte le saut de pause).
-          // Avant : newSlot = slotStart + slotsNeeded → faux quand l'intervention traverse la pause,
-          //         ce qui déclenchait une cascade erronée au 2e forfait.
           const dureeBlocVisuel = tempsReel + tcHeures;
           const slotsNeededPrev = Math.max(1, Math.ceil(dureeBlocVisuel / SLOT_DURATION));
           const fpPrev = footprintOnDay(slotStart, slotsNeededPrev);
           const lastSlotUsed = (fpPrev.length > 0) ? fpPrev[fpPrev.length - 1] : (slotStart + slotsNeededPrev - 1);
           const newSlot = lastSlotUsed + 1;
-          // S'assurer que le slot existe dans le menu (saute la pause déjeuner si on tombe pile dessus)
           const heureSelect = document.getElementById('f-heure');
           const heureOptions = Array.from(heureSelect.options).map(o => parseInt(o.value));
           const maxOption = heureOptions[heureOptions.length - 1];
@@ -5239,8 +5234,29 @@
           if (heureOptions.includes(nextSlot)) {
             heureSelect.value = nextSlot;
           } else {
-            // Débordement en fin de journée : on reste sur la dernière valeur valide
-            heureSelect.value = maxOption;
+            // v58 : débordement en fin de journée → avancer au prochain jour ouvré de la semaine
+            //       (évite la cascade erronée où heure fallback = milieu de l'intervention #1)
+            const dateSelect = document.getElementById('f-date');
+            const currentDay = parseInt(dateSelect.value) || 0;
+            let nextDayFound = -1;
+            for (let d = currentDay + 1; d < 6; d++) {
+              const futureDate = new Date(selectedMonday);
+              futureDate.setDate(selectedMonday.getDate() + d);
+              if (!isDayBlocked(futureDate)) {
+                nextDayFound = d;
+                break;
+              }
+            }
+            if (nextDayFound >= 0) {
+              dateSelect.value = nextDayFound;
+              // Démarre à 09:00 (slot 2) le lendemain si disponible, sinon 1er slot dispo
+              heureSelect.value = heureOptions.includes(2) ? 2 : heureOptions[0];
+              showFormFeedback('ℹ️ Journée complète → le prochain forfait démarre le ' + DAYS[nextDayFound].toLowerCase() + ' à ' + slotToTimeLabel(parseInt(heureSelect.value)), 'info');
+            } else {
+              // Aucun jour ouvré restant dans la semaine → remet à 08:00 et avertit
+              heureSelect.value = heureOptions[0];
+              showFormFeedback('⚠️ Journée complète + aucun jour ouvré restant cette semaine. Choisissez manuellement date et heure.', 'error');
+            }
           }
 
           // Vider uniquement Forfait + Durée + Quantité pour saisir le 2e forfait
