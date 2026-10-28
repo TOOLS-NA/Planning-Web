@@ -5399,8 +5399,21 @@
             }
             if (nextDayFound >= 0) {
               dateSelect.value = nextDayFound;
-              // Démarre à 09:00 (slot 2) le lendemain si disponible, sinon 1er slot dispo
-              heureSelect.value = heureOptions.includes(2) ? 2 : heureOptions[0];
+              // v58f : si l'intervention qu'on vient de poser déborde sur ce jour, démarrer APRÈS le débordement
+              const overflowSlots = slotsNeededPrev - fpPrev.length;
+              let startOnNextDay = heureOptions.includes(2) ? 2 : heureOptions[0];
+              if (overflowSlots > 0) {
+                const grisNextDay = new Set(getHoraireGrisSlots(technicien, nextDayFound));
+                const overflowFp = footprintOnDay(2, overflowSlots, grisNextDay);
+                if (overflowFp.length > 0) {
+                  const lastOverflowSlot = overflowFp[overflowFp.length - 1];
+                  const afterOverflow = heureOptions.find(opt => opt > lastOverflowSlot && !grisNextDay.has(opt));
+                  if (afterOverflow !== undefined) {
+                    startOnNextDay = afterOverflow;
+                  }
+                }
+              }
+              heureSelect.value = startOnNextDay;
               showFormFeedback('ℹ️ Journée complète → le prochain forfait démarre le ' + DAYS[nextDayFound].toLowerCase() + ' à ' + slotToTimeLabel(parseInt(heureSelect.value)), 'info');
             } else {
               // Aucun jour ouvré restant dans la semaine → remet à 08:00 et avertit
