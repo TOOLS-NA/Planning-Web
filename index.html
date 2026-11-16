@@ -1730,12 +1730,9 @@
     }
 
     window.addEventListener('load', () => {
-      const checkGoogle = setInterval(() => {
-        if (window.google && window.google.accounts) {
-          clearInterval(checkGoogle);
-          initGoogleAuth();
-        }
-      }, 100);
+      // v58h : plus besoin d'attendre le SDK GIS (window.google) — on utilise notre propre flux popup.
+      //        Le script gsi/client reste chargé (inoffensif) mais plus consommé par notre logique OAuth.
+      initGoogleAuth();
 
       document.getElementById('screen-login').classList.remove('hidden');
 
@@ -2017,13 +2014,20 @@
       });
     });
 
+    // v58h : flux OAuth custom via popup → oauth-callback.html → localStorage → storage event
+    //        Contourne le COOP strict de tools-na.github.io qui faisait planter GIS initTokenClient
+    //        (window.closed inaccessible → popup_closed systématique).
+    //        Le token est transmis de la popup à l'app via localStorage (même origine).
+    let oauthInFlight = false;
+    let oauthInFlightSilent = false;
+    let oauthWatchdogTimer = null;
+
     function initGoogleAuth() {
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CONFIG.CLIENT_ID,
-        scope: CONFIG.SCOPES,
-        callback: onAuthSuccess,
-        error_callback: onAuthError
-      });
+      window.addEventListener('storage', onOAuthStorageEvent);
+      // Vérifier au chargement si un résultat OAuth traîne déjà (ex. popup fermée pendant que l'app n'écoutait pas)
+      if (localStorage.getItem('oauth_result')) {
+        processOAuthResult();
+      }
       if (localStorage.getItem('hasLoggedInBefore') === 'true') {
         showStatus('Reconnexion en cours...', 'info');
         login(true);
@@ -2032,9 +2036,102 @@
       }
     }
 
+    function onOAuthStorageEvent(e) {
+      if (e.key !== 'oauth_result' || !e.newValue) return;
+      processOAuthResult();
+    }
+
+    function processOAuthResult() {
+      const raw = localStorage.getItem('oauth_result');
+      if (!raw) return;
+      localStorage.removeItem('oauth_result');
+      clearTimeout(oauthWatchdogTimer);
+      oauthInFlight = false;
+      let payload;
+      try { payload = JSON.parse(raw); } catch (e) {
+        onAuthError({ type: 'invalid_response', message: 'Réponse OAuth illisible' });
+        return;
+      }
+      if (payload.error) {
+        onAuthError({ type: payload.error, message: payload.error_description || payload.error });
+        return;
+      }
+      if (!payload.access_token) {
+        onAuthError({ type: 'no_token', message: 'Aucun token reçu de Google' });
+        return;
+      }
+      if (!payload.stateMatch) {
+        onAuthError({ type: 'state_mismatch', message: 'State OAuth non vérifié (anti-CSRF)' });
+        return;
+      }
+      onAuthSuccess({
+        access_token: payload.access_token,
+        expires_in: payload.expires_in || 3600
+      });
+    }
+
+    function generateOAuthState() {
+      const arr = new Uint8Array(16);
+      crypto.getRandomValues(arr);
+      return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function buildOAuthCallbackUri() {
+      // Résout "oauth-callback.html" dans le MÊME dossier que index.html.
+      // ex. https://tools-na.github.io/Planning-Web/ → https://tools-na.github.io/Planning-Web/oauth-callback.html
+      const base = window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '/');
+      return base + 'oauth-callback.html';
+    }
+
     function login(silent) {
-      if (!tokenClient) { showStatus('⚠️ Google Auth non chargé. Rechargez la page.', 'error'); return; }
-      tokenClient.requestAccessToken({ prompt: silent ? '' : 'consent' });
+      if (oauthInFlight) {
+        console.warn('[Auth] Login déjà en cours, ignoré');
+        return;
+      }
+      const state = generateOAuthState();
+      try { localStorage.setItem('oauth_pending_state', state); } catch (e) {}
+      const redirectUri = buildOAuthCallbackUri();
+      const url = 'https://accounts.google.com/o/oauth2/v2/auth'
+        + '?client_id=' + encodeURIComponent(CONFIG.CLIENT_ID)
+        + '&redirect_uri=' + encodeURIComponent(redirectUri)
+        + '&response_type=token'
+        + '&scope=' + encodeURIComponent(CONFIG.SCOPES)
+        + '&include_granted_scopes=true'
+        + '&state=' + encodeURIComponent(state)
+        + (silent ? '&prompt=none' : '&prompt=consent');
+      // Popup visible pour un login initial ; popup minuscule mais visible pour un refresh silencieux
+      const features = silent
+        ? 'width=400,height=200,left=0,top=0'
+        : 'width=500,height=650,left=' + Math.max(0, (window.screen.availWidth - 500) / 2) + ',top=' + Math.max(0, (window.screen.availHeight - 650) / 2);
+      const popup = window.open(url, 'planning_oauth', features);
+      if (!popup) {
+        onAuthError({ type: 'popup_blocked', message: 'La popup OAuth a été bloquée par le navigateur. Autorisez les popups pour ce site puis réessayez.' });
+        return;
+      }
+      oauthInFlight = true;
+      oauthInFlightSilent = !!silent;
+      // Watchdog : si rien ne remonte dans un délai raisonnable, on débloque
+      // (couvre le cas où l'utilisateur ferme la popup sans consentir)
+      clearTimeout(oauthWatchdogTimer);
+      oauthWatchdogTimer = setTimeout(() => {
+        if (!oauthInFlight) return;
+        oauthInFlight = false;
+        // Si c'était un refresh silencieux, on reste discret
+        if (oauthInFlightSilent) {
+          console.warn('[Auth] Refresh silencieux sans réponse — on ne dérange pas l\'utilisateur');
+        } else {
+          onAuthError({ type: 'popup_closed', message: 'Popup fermée sans connexion' });
+        }
+      }, silent ? 8000 : 180000);
+    }
+
+    // Révocation manuelle d'un token Google (remplace google.accounts.oauth2.revoke du SDK GIS)
+    function revokeToken(token) {
+      if (!token) return Promise.resolve();
+      return fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(token), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      }).catch(() => { /* silencieux : révocation best-effort */ });
     }
 
     // Programme le rafraîchissement automatique du token.
@@ -2118,17 +2215,15 @@
 
     // Reconnexion : nettoyage complet + relance OAuth
     async function scopeReconnect() {
-      // 1. Révoquer le token courant côté Google (si possible)
-      try {
-        if (accessToken && window.google && google.accounts && google.accounts.oauth2) {
-          google.accounts.oauth2.revoke(accessToken, () => {});
-        }
-      } catch (e) { /* silencieux */ }
+      // 1. Révoquer le token courant côté Google (best-effort)
+      try { await revokeToken(accessToken); } catch (e) { /* silencieux */ }
 
       // 2. Vider les données locales de session
       accessToken = null;
       userEmail = null;
       localStorage.removeItem('hasLoggedInBefore');
+      localStorage.removeItem('oauth_result');
+      localStorage.removeItem('oauth_pending_state');
 
       // 3. Vider les caches (au cas où un token corrompu y traînerait)
       try {
@@ -2139,14 +2234,8 @@
       } catch (e) { /* silencieux */ }
 
       // 4. Relancer OAuth avec prompt='consent' pour forcer l'écran de permissions
-      //    (l'utilisateur DOIT re-voir et re-cocher les scopes)
       closeScopeModal();
-      if (tokenClient) {
-        tokenClient.requestAccessToken({ prompt: 'consent' });
-      } else {
-        // Si le tokenClient n'est pas prêt, on recharge la page proprement
-        window.location.reload();
-      }
+      login(false);
     }
 
     // =====================================================
@@ -2156,11 +2245,12 @@
     // mémorisée en localStorage : si elle a changé, c'est qu'une nouvelle version
     // a été publiée → badge clignotant sur le bouton MAJ.
     // v49b : détection automatique du repo à surveiller selon l'URL de la PWA
-    //   - tools-na.github.io/Planning-Web/  → repo TOOLS-NA/Planning-Web
+    //   - tools-na.github.io/Planning-Web/   → repo TOOLS-NA/Planning-Web
     //   - pierrenarb.github.io/Planning-Web/ → repo pierrenarb/Planning-Web (fallback historique)
-    const GITHUB_REPO = window.location.hostname.includes('tools-na')
-      ? 'TOOLS-NA/Planning-Web'
-      : 'pierrenarb/Planning-Web';
+    //   - *.pages.dev / autre hébergeur      → repo TOOLS-NA/Planning-Web (migration Cloudflare Pages v58g)
+    const GITHUB_REPO = window.location.hostname.includes('pierrenarb')
+      ? 'pierrenarb/Planning-Web'
+      : 'TOOLS-NA/Planning-Web';
     const GITHUB_COMMITS_API = `https://api.github.com/repos/${GITHUB_REPO}/commits?per_page=1`;
     console.log(`[MAJ] Surveillance du repo : ${GITHUB_REPO}`);
     let updateCheckInProgress = false;
@@ -2393,7 +2483,7 @@
     }
 
     function logout() {
-      if (accessToken) google.accounts.oauth2.revoke(accessToken);
+      if (accessToken) revokeToken(accessToken);
       accessToken = null; userEmail = null; allInterventions = []; assortiment = [];
       joursFeries = []; currentSite = null; accessibleSites = [];
       if (window.tokenRefreshTimer) clearTimeout(window.tokenRefreshTimer);

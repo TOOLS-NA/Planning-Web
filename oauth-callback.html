@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Connexion — Planning Atelier</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; padding:40px 20px; text-align:center; color:#334155; background:#f8fafc; }
+    .ok { color:#15803d; }
+    .err { color:#b91c1c; }
+    h1 { margin:0 0 8px; font-size:18px; }
+    p { margin:4px 0; font-size:14px; }
+    .hint { color:#64748b; font-size:12px; margin-top:16px; }
+  </style>
+</head>
+<body>
+  <h1 id="title">Finalisation de la connexion…</h1>
+  <p id="sub">Merci de patienter, cette fenêtre se ferme automatiquement.</p>
+  <p class="hint" id="hint"></p>
+  <script>
+  (function() {
+    'use strict';
+    try {
+      var frag = (window.location.hash || '').replace(/^#/, '');
+      var params = new URLSearchParams(frag);
+      var accessToken = params.get('access_token');
+      var expiresIn = params.get('expires_in');
+      var state = params.get('state');
+      var errorCode = params.get('error');
+      var errorDesc = params.get('error_description');
+
+      var expectedState = null;
+      try { expectedState = localStorage.getItem('oauth_pending_state'); } catch (e) {}
+
+      var stateOk = !!(state && expectedState && state === expectedState);
+
+      var payload = {
+        timestamp: Date.now(),
+        access_token: accessToken || null,
+        expires_in: expiresIn ? Number(expiresIn) : null,
+        error: errorCode || null,
+        error_description: errorDesc || null,
+        stateMatch: stateOk
+      };
+
+      try {
+        localStorage.setItem('oauth_result', JSON.stringify(payload));
+        localStorage.removeItem('oauth_pending_state');
+      } catch (e) {
+        document.getElementById('title').textContent = 'Erreur de stockage';
+        document.getElementById('title').className = 'err';
+        document.getElementById('sub').textContent = e.message || '';
+        return;
+      }
+
+      if (errorCode) {
+        document.getElementById('title').textContent = 'Connexion refusée';
+        document.getElementById('title').className = 'err';
+        document.getElementById('sub').textContent = errorDesc || errorCode;
+        document.getElementById('hint').textContent = 'Fermeture dans 3 secondes…';
+        setTimeout(function() { try { window.close(); } catch (e) {} }, 3000);
+      } else if (!accessToken) {
+        document.getElementById('title').textContent = 'Aucun token reçu';
+        document.getElementById('title').className = 'err';
+        document.getElementById('sub').textContent = 'La réponse Google ne contient pas de token.';
+        document.getElementById('hint').textContent = 'Fermeture dans 3 secondes…';
+        setTimeout(function() { try { window.close(); } catch (e) {} }, 3000);
+      } else if (!stateOk) {
+        document.getElementById('title').textContent = 'Vérification de sécurité échouée';
+        document.getElementById('title').className = 'err';
+        document.getElementById('sub').textContent = 'State OAuth non conforme (anti-CSRF).';
+        document.getElementById('hint').textContent = 'Fermeture dans 3 secondes…';
+        setTimeout(function() { try { window.close(); } catch (e) {} }, 3000);
+      } else {
+        document.getElementById('title').textContent = 'Connexion réussie ✅';
+        document.getElementById('title').className = 'ok';
+        document.getElementById('sub').textContent = 'Fermeture automatique…';
+        setTimeout(function() { try { window.close(); } catch (e) {} }, 80);
+      }
+    } catch (e) {
+      document.getElementById('title').textContent = 'Erreur inattendue';
+      document.getElementById('title').className = 'err';
+      document.getElementById('sub').textContent = (e && e.message) || String(e);
+    }
+  })();
+  </script>
+</body>
+</html>
