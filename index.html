@@ -2083,7 +2083,7 @@
       return base + 'oauth-callback.html';
     }
 
-    function login(silent) {
+    function login(silent, forceConsent) {
       if (oauthInFlight) {
         console.warn('[Auth] Login déjà en cours, ignoré');
         return;
@@ -2091,6 +2091,13 @@
       const state = generateOAuthState();
       try { localStorage.setItem('oauth_pending_state', state); } catch (e) {}
       const redirectUri = buildOAuthCallbackUri();
+      // v58i : prompt=select_account pour le login manuel normal (laisse Google skipper le consent
+      //         si l'utilisateur a déjà donné son accord — plus de re-consentement à chaque session).
+      //         prompt=consent uniquement quand on VEUT forcer la demande (scopeReconnect, nouveau scope).
+      let promptMode;
+      if (silent) promptMode = 'none';
+      else if (forceConsent) promptMode = 'consent';
+      else promptMode = 'select_account';
       const url = 'https://accounts.google.com/o/oauth2/v2/auth'
         + '?client_id=' + encodeURIComponent(CONFIG.CLIENT_ID)
         + '&redirect_uri=' + encodeURIComponent(redirectUri)
@@ -2098,7 +2105,7 @@
         + '&scope=' + encodeURIComponent(CONFIG.SCOPES)
         + '&include_granted_scopes=true'
         + '&state=' + encodeURIComponent(state)
-        + (silent ? '&prompt=none' : '&prompt=consent');
+        + '&prompt=' + promptMode;
       // Popup visible pour un login initial ; popup minuscule mais visible pour un refresh silencieux
       const features = silent
         ? 'width=400,height=200,left=0,top=0'
@@ -2235,7 +2242,7 @@
 
       // 4. Relancer OAuth avec prompt='consent' pour forcer l'écran de permissions
       closeScopeModal();
-      login(false);
+      login(false, true);  // v58i : forceConsent = true (scope insuffisant → on re-demande le consentement complet)
     }
 
     // =====================================================
